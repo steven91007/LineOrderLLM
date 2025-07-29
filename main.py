@@ -1,4 +1,3 @@
-import os
 from flask import Flask, request, abort
 from dotenv import load_dotenv
 
@@ -9,28 +8,43 @@ from linebot.v3.exceptions import (
     InvalidSignatureError
 )
 from linebot.v3.messaging import (
-    Configuration,
-    ApiClient,
-    MessagingApi,
-    ReplyMessageRequest,
-    TextMessage
+    Configuration
 )
 from linebot.v3.webhooks import (
     MessageEvent,
-    TextMessageContent
+    TextMessageContent,
+    PostbackEvent
 )
 
 # 載入環境變數
 load_dotenv()
 
-app = Flask(__name__)
+# 匯入自定義模組
+from config import (
+    LINE_CHANNEL_ACCESS_TOKEN,
+    LINE_CHANNEL_SECRET,
+    AUTHORIZED_USERS,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    GOOGLE_SHEET_ID,
+    GOOGLE_CREDENTIALS_PATH
+)
+from src.handlers.order_handler import OrderHandler
 
-# 從環境變數取得配置
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
+app = Flask(__name__)
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# 初始化訂單處理器
+order_handler = OrderHandler(
+    configuration, 
+    AUTHORIZED_USERS,
+    openai_api_key=OPENAI_API_KEY,
+    openai_model=OPENAI_MODEL,
+    google_sheet_id=GOOGLE_SHEET_ID,
+    google_credentials_path=GOOGLE_CREDENTIALS_PATH
+)
 
 @app.route("/")
 def index():
@@ -57,15 +71,15 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=event.message.text)]
-            )
-        )
+    # 使用訂單處理器處理訊息
+    order_handler.handle_text_message(event)
+
+
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    # 處理按鈕回應
+    order_handler.handle_postback(event)
 
 if __name__ == "__main__":
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=os.getenv('DEBUG', 'False').lower() == 'true')
+    from config import PORT, DEBUG
+    app.run(host='0.0.0.0', port=PORT, debug=DEBUG)
