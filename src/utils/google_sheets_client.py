@@ -33,7 +33,7 @@ class GoogleSheetsClient:
             return None
     
     def append_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
-        """將訂單資料添加到試算表"""
+        """將訂單資料添加到試算表（支援單一訂單和多訂單）"""
         if not self.service:
             return {
                 'success': False,
@@ -45,12 +45,12 @@ class GoogleSheetsClient:
             values = [[
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # 訂單時間
                 order_data.get('order_id', ''),
-                order_data.get('sender_name', ''),
-                order_data.get('sender_phone', ''),
+                order_data.get('sender_name', '') or '未提供',  # 寄件人選填
+                order_data.get('sender_phone', '') or '未提供',  # 寄件人電話選填
                 order_data.get('receiver_name', ''),
                 order_data.get('receiver_phone', ''),
                 self._format_items(order_data.get('items', [])),
-                order_data.get('shipping_date', ''),
+                order_data.get('shipping_date', '') or '未提供',
                 order_data.get('shipping_address', ''),
                 order_data.get('status', '待處理'),
                 order_data.get('notes', '')
@@ -75,7 +75,8 @@ class GoogleSheetsClient:
             return {
                 'success': True,
                 'updated_cells': result.get('updates', {}).get('updatedCells', 0),
-                'updated_rows': result.get('updates', {}).get('updatedRows', 0)
+                'updated_rows': result.get('updates', {}).get('updatedRows', 0),
+                'order_id': order_data.get('order_id', '')
             }
             
         except HttpError as error:
@@ -101,6 +102,83 @@ class GoogleSheetsClient:
             formatted_items.append(f"{name} x {quantity}")
         
         return ', '.join(formatted_items)
+    
+    def append_multiple_orders(self, orders_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """批量添加多份訂單到試算表"""
+        if not self.service:
+            return {
+                'success': False,
+                'error': 'Google Sheets service not available',
+                'results': []
+            }
+        
+        if not orders_data:
+            return {
+                'success': True,
+                'results': [],
+                'total_processed': 0
+            }
+        
+        try:
+            # 準備批量資料
+            values = []
+            order_ids = []
+            
+            for order_data in orders_data:
+                row = [
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    order_data.get('order_id', ''),
+                    order_data.get('sender_name', '') or '未提供',
+                    order_data.get('sender_phone', '') or '未提供',
+                    order_data.get('receiver_name', ''),
+                    order_data.get('receiver_phone', ''),
+                    self._format_items(order_data.get('items', [])),
+                    order_data.get('shipping_date', '') or '未提供',
+                    order_data.get('shipping_address', ''),
+                    order_data.get('status', '待處理'),
+                    order_data.get('notes', '')
+                ]
+                values.append(row)
+                order_ids.append(order_data.get('order_id', ''))
+            
+            # 指定寫入範圍（A:K 表示從 A 欄到 K 欄）
+            range_name = 'Sheet1!A:K'
+            
+            # 執行批量寫入操作
+            body = {
+                'values': values,
+                'majorDimension': 'ROWS',
+            }
+            
+            result = self.service.spreadsheets().values().append(
+                spreadsheetId=self.sheet_id,
+                range=range_name,
+                valueInputOption='USER_ENTERED',
+                body=body
+            ).execute()
+            
+            return {
+                'success': True,
+                'updated_cells': result.get('updates', {}).get('updatedCells', 0),
+                'updated_rows': result.get('updates', {}).get('updatedRows', 0),
+                'total_processed': len(orders_data),
+                'order_ids': order_ids
+            }
+            
+        except HttpError as error:
+            return {
+                'success': False,
+                'error': f'Google Sheets API error: {error}',
+                'total_processed': 0,
+                'order_ids': []
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Unexpected error: {e}',
+                'total_processed': 0,
+                'order_ids': []
+            }
     
     def create_sheet_if_not_exists(self) -> bool:
         """確保試算表存在並有正確的標題"""
