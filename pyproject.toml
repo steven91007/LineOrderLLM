@@ -7,8 +7,11 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.116.1",
     "flask>=3.1.1",
+    "google>=3.0.0",
+    "google-api-python-client>=2.177.0",
     "httpx>=0.28.1",
     "line-bot-sdk>=3.17.1",
+    "openai>=1.97.1",
     "pydantic-settings>=2.10.1",
     "pytest>=8.4.1",
     "uvicorn>=0.35.0",
