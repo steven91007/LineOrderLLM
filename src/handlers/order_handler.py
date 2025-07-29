@@ -16,15 +16,26 @@ from typing import Dict, Any, List
 import uuid
 from datetime import datetime
 from ..utils.openai_client import OpenAIClient
+from ..utils.dspy_client import DSPyOrderClient
 from ..utils.google_sheets_client import GoogleSheetsClient
 
 
 class OrderHandler:
-    def __init__(self, configuration, authorized_users, openai_api_key=None, openai_model=None, google_sheet_id=None, google_credentials_path=None):
+    def __init__(self, configuration, authorized_users, client_type='openai', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None):
         self.configuration = configuration
         self.authorized_users = authorized_users
         self.order_sessions = {}  # 存儲用戶的訂單處理狀態
-        self.openai_client = OpenAIClient(openai_api_key, openai_model) if openai_api_key else None
+        self.client_type = client_type
+        
+        # 初始化訂單解析客戶端
+        if client_type == 'dspy' and dspy_api_key:
+            self.order_client = DSPyOrderClient(dspy_api_key, dspy_model, dspy_max_retries)
+        elif openai_api_key:
+            self.order_client = OpenAIClient(openai_api_key, openai_model)
+        else:
+            self.order_client = None
+        
+        # Google Sheets 客戶端
         self.sheets_client = GoogleSheetsClient(google_credentials_path, google_sheet_id) if google_sheet_id and google_credentials_path else None
         
         # 初始化 Google Sheets（建立標題）
@@ -137,13 +148,13 @@ class OrderHandler:
         self.order_sessions[user_id]['data']['raw_text'] = order_text
         self.order_sessions[user_id]['status'] = 'parsing'
         
-        if self.openai_client:
-            # 使用 OpenAI 解析訂單
-            result = self.openai_client.parse_order(order_text)
+        if self.order_client:
+            # 使用訂單解析客戶端（OpenAI 或 DSPy）
+            result = self.order_client.parse_order(order_text)
             
             if result['success']:
                 parsed_data = result['data']
-                validation = self.openai_client.validate_parsed_order(parsed_data)
+                validation = self.order_client.validate_parsed_order(parsed_data)
                 
                 if validation['is_valid']:
                     # 儲存解析結果
@@ -171,10 +182,11 @@ class OrderHandler:
                 else:
                     self._reply_text(event, f"解析訂單時發生錯誤：{error_message}\n\n請稍後再試或聯絡管理員。")
         else:
-            # 沒有設定 OpenAI
+            # 沒有設定訂單解析客戶端
+            client_name = self.client_type.upper() if self.client_type else 'AI'
             self._reply_text(event, 
                 f"已收到您的訂單資訊：\n\n{order_text}\n\n"
-                "（目前尚未啟用自動解析功能）"
+                f"（目前尚未啟用 {client_name} 自動解析功能）"
             )
         
         # 如果不是在確認狀態，清除會話
