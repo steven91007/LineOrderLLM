@@ -26,6 +26,10 @@ from config import (
     AUTHORIZED_USERS,
     OPENAI_API_KEY,
     OPENAI_MODEL,
+    DSPY_API_KEY,
+    DSPY_MODEL,
+    DSPY_MAX_RETRIES,
+    ORDER_CLIENT_TYPE,
     GOOGLE_SHEET_ID,
     GOOGLE_CREDENTIALS_PATH
 )
@@ -40,8 +44,12 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 order_handler = OrderHandler(
     configuration, 
     AUTHORIZED_USERS,
+    client_type=ORDER_CLIENT_TYPE,
     openai_api_key=OPENAI_API_KEY,
     openai_model=OPENAI_MODEL,
+    dspy_api_key=DSPY_API_KEY,
+    dspy_model=DSPY_MODEL,
+    dspy_max_retries=DSPY_MAX_RETRIES,
     google_sheet_id=GOOGLE_SHEET_ID,
     google_credentials_path=GOOGLE_CREDENTIALS_PATH
 )
