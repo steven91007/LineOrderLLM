@@ -11,6 +11,14 @@ LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4-0125-preview')
 
+# DSPy 配置
+DSPY_API_KEY = os.getenv('DSPY_API_KEY', OPENAI_API_KEY)  # 預設使用 OpenAI API Key
+DSPY_MODEL = os.getenv('DSPY_MODEL', 'gpt-4-0125-preview')
+DSPY_MAX_RETRIES = int(os.getenv('DSPY_MAX_RETRIES', 3))
+
+# 訂單客戶端類型選擇
+ORDER_CLIENT_TYPE = os.getenv('ORDER_CLIENT_TYPE', 'openai')  # 'openai' 或 'dspy'
+
 # Google Sheets 配置
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
