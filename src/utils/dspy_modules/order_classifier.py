@@ -40,18 +40,32 @@ class OrderTypeClassifier(dspy.Module):
     
     def _contains_multiple_orders(self, text: str) -> bool:
         """
-        簡單的啟發式判斷是否包含多訂單
+        判斷是否包含多訂單（多個收件人或多個地址）
         """
-        indicators = [
-            '訂單1', '訂單2', '訂單3', '訂單4', '訂單5',
-            'order1', 'order2', 'order3', 'order4', 'order5',
-            '第一筆', '第二筆', '第三筆', '第四筆', '第五筆',
-            '1.', '2.', '3.', '4.', '5.',
-            '1)', '2)', '3)', '4)', '5)',
+        import re
+        
+        # 檢查關鍵字出現次數
+        receiver_count = len(re.findall(r'收件人', text))
+        address_count = len(re.findall(r'地址|收件地址|送[到至]', text))
+        phone_count = len(re.findall(r'電話|手機|聯絡', text))
+        
+        # 檢查序號標記
+        numbering_patterns = [
+            r'^\s*[1-5][.、）]\s*',
+            r'\n\s*[1-5][.、）]\s*',
+            r'^\s*[一二三四五][、.）]\s*',
+            r'\n\s*[一二三四五][、.）]\s*'
         ]
+        has_numbering = sum(1 for pattern in numbering_patterns if re.search(pattern, text, re.MULTILINE)) >= 2
         
-        text_lower = text.lower()
-        indicator_count = sum(1 for indicator in indicators if indicator.lower() in text_lower)
+        # 判斷邏輯
+        if receiver_count >= 2 or address_count >= 2:
+            return True
+            
+        if has_numbering and (receiver_count >= 1 or address_count >= 1):
+            return True
+            
+        if receiver_count >= 2 and phone_count >= 2:
+            return True
         
-        # 如果有2個或以上的指標，可能是多訂單
-        return indicator_count >= 2
+        return False
