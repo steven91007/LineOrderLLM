@@ -16,9 +16,10 @@ class AddressNormalizerSignature(dspy.Signature):
     - 更新舊地名（如：桃園縣中壢市 → 桃園市中壢區）
     - 統一用字（如：台北 → 臺北）
     - 修正錯別字和格式問題
+    - 保留地址備註（如：(XXX工地)、(XXX公司)等括號內容）
     """
     original_address = dspy.InputField(desc="原始地址文字，可能不完整或格式不標準")
-    normalized_address = dspy.OutputField(desc="標準化後的完整台灣地址，格式：縣市+區域+詳細地址")
+    normalized_address = dspy.OutputField(desc="標準化後的完整台灣地址，格式：縣市+區域+詳細地址，必須保留原有的括號備註信息")
 
 
 class AddressNormalizer(dspy.Module):
@@ -68,6 +69,32 @@ class AddressNormalizer(dspy.Module):
             dspy.Example(
                 original_address="台南縣永康市中正路529號",
                 normalized_address="臺南市永康區中正路529號"
+            ).with_inputs("original_address"),
+            
+            # 包含備註的範例
+            dspy.Example(
+                original_address="士林區文林路100號(台積電工地)",
+                normalized_address="臺北市士林區文林路100號(台積電工地)"
+            ).with_inputs("original_address"),
+            
+            dspy.Example(
+                original_address="桃園縣中壢市中大路300號(中原大學)",
+                normalized_address="桃園市中壢區中大路300號(中原大學)"
+            ).with_inputs("original_address"),
+            
+            dspy.Example(
+                original_address="板橋區文化路100號(遠東百貨)",
+                normalized_address="新北市板橋區文化路100號(遠東百貨)"
+            ).with_inputs("original_address"),
+            
+            dspy.Example(
+                original_address="信義區市府路1號(台北101大樓)",
+                normalized_address="臺北市信義區市府路1號(台北101大樓)"
+            ).with_inputs("original_address"),
+            
+            dspy.Example(
+                original_address="高雄縣鳳山市光復路132號(建築工地)",
+                normalized_address="高雄市鳳山區光復路132號(建築工地)"
             ).with_inputs("original_address")
         ]
         
@@ -113,10 +140,17 @@ class AddressNormalizer(dspy.Module):
         return any(indicator in address for indicator in city_indicators)
     
     def _fallback_completion(self, address: str) -> str:
-        """簡單的 fallback 地址補全"""
-        # 如果已經有縣市，直接返回
+        """簡單的 fallback 地址補全（保留備註）"""
+        # 如果已經有縣市，直接返回  
         if self._has_city_info(address):
             return address
+        
+        # 提取備註（括號內容）
+        import re
+        note_pattern = r'\([^)]+\)$'
+        note_match = re.search(note_pattern, address)
+        note = note_match.group(0) if note_match else ''
+        address_without_note = re.sub(note_pattern, '', address).strip()
         
         # 簡單的區域對應
         district_mapping = {
@@ -148,14 +182,20 @@ class AddressNormalizer(dspy.Module):
             '楊梅': '桃園市楊梅區'
         }
         
+        result = address_without_note
         for district, full_name in district_mapping.items():
-            if f"{district}區" in address:
-                return address.replace(f"{district}區", full_name)
-            elif district in address and not f"{district}區" in address:
-                return address.replace(district, full_name)
+            if f"{district}區" in result:
+                result = result.replace(f"{district}區", full_name)
+                break
+            elif district in result and not f"{district}區" in result:
+                result = result.replace(district, full_name)
+                break
         
-        # 如果找不到匹配，直接返回原地址
-        return address
+        # 重新加上備註
+        if note:
+            result = f"{result}{note}"
+        
+        return result if result != address_without_note + note else address
 
 
 # 建立全域實例供其他模組使用
