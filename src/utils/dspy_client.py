@@ -6,6 +6,8 @@ import json
 from typing import Dict, Any, List
 import re
 
+from .taiwan_address import TaiwanAddressNormalizer
+
 from .dspy_modules.order_classifier import OrderTypeClassifier
 from .dspy_modules.single_parser import SingleOrderParser
 from .dspy_modules.multi_parser import MultiOrderParser
@@ -37,11 +39,12 @@ class DSPyOrderClient:
         self.multi_parser = MultiOrderParser()
         self.validator = OrderValidator()
         self.json_validator = JSONValidator()
+        self.address_normalizer = TaiwanAddressNormalizer()
     
     def _configure_dspy(self):
         """配置 DSPy 設定"""
         # 設定 OpenAI 作為語言模型
-        lm = dspy.OpenAI(
+        lm = dspy.LM(
             model=self.model,
             api_key=self.api_key,
             max_tokens=2000,
@@ -89,6 +92,7 @@ class DSPyOrderClient:
                 validation_result = self._validate_parsed_data(parsed_data)
                 
                 if validation_result['is_valid']:
+                    parsed_data = self._normalize_addresses_in_result(parsed_data)
                     return {
                         'success': True,
                         'data': parsed_data,
@@ -168,21 +172,59 @@ class DSPyOrderClient:
     
     def _contains_multiple_indicators(self, text: str) -> bool:
         """檢查文字是否包含多訂單指標"""
-        indicators = [
-            r'訂單\s*[1-5]', r'order\s*[1-5]',
-            r'第[一二三四五]\s*筆', r'第[1-5]\s*筆',
-            r'\d+\.', r'\d+\)',
-            r'[1-5]\s*[.、，]'
+        # 檢查是否有多個收件人
+        receiver_patterns = [
+            r'收件人[：:].*?收件人',
+            r'收件人\d+[：:]',
+            r'第[一二三四五]位?收件人',
+            r'第[1-5]位?收件人',
+            r'收件人[1-5][：:]'
+        ]
+        
+        # 檢查是否有多個地址
+        address_patterns = [
+            r'地址[：:].*?地址',
+            r'收件地址[：:].*?收件地址',
+            r'地址\d+[：:]',
+            r'第[一二三四五]個?地址',
+            r'第[1-5]個?地址',
+            r'送[到至].*?[、，].*?送[到至]'
+        ]
+        
+        # 檢查序號標記（1. 2. 或 一、二、）
+        numbering_patterns = [
+            r'^\s*[1-5][.、）]\s*',
+            r'\n\s*[1-5][.、）]\s*',
+            r'^\s*[一二三四五][、.）]\s*',
+            r'\n\s*[一二三四五][、.）]\s*'
         ]
         
         text_lower = text.lower()
-        matches = 0
         
-        for pattern in indicators:
-            if re.search(pattern, text_lower):
-                matches += 1
+        # 計算各種指標
+        has_multiple_receivers = any(re.search(pattern, text_lower) for pattern in receiver_patterns)
+        has_multiple_addresses = any(re.search(pattern, text_lower) for pattern in address_patterns)
+        has_numbering = sum(1 for pattern in numbering_patterns if re.search(pattern, text, re.MULTILINE)) >= 2
         
-        return matches >= 2
+        # 檢查關鍵字重複次數
+        receiver_count = len(re.findall(r'收件人', text))
+        address_count = len(re.findall(r'地址|收件地址|送[到至]', text))
+        phone_count = len(re.findall(r'電話|手機|聯絡', text))
+        
+        # 判斷是否為多訂單
+        if has_multiple_receivers or has_multiple_addresses:
+            return True
+        
+        if has_numbering and (receiver_count >= 2 or address_count >= 2):
+            return True
+            
+        if receiver_count >= 2 and address_count >= 2:
+            return True
+            
+        if receiver_count >= 2 and phone_count >= 2:
+            return True
+        
+        return False
     
     def validate_parsed_order(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -304,3 +346,21 @@ class DSPyOrderClient:
                 return True
         
         return False
+    
+    def _normalize_addresses_in_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """標準化解析結果中的地址"""
+        order_type = result.get('order_type', 'single')
+        
+        if order_type == 'single':
+            # 處理單一訂單的地址
+            if 'shipping_address' in result and result['shipping_address']:
+                result['shipping_address'] = self.address_normalizer.normalize_address(result['shipping_address'])
+                
+        elif order_type == 'multiple':
+            # 處理多訂單的地址
+            orders = result.get('orders', [])
+            for order in orders:
+                if 'shipping_address' in order and order['shipping_address']:
+                    order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
+        
+        return result
