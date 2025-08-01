@@ -7,36 +7,45 @@ from src.utils.taiwan_address import TaiwanAddressNormalizer
 
 def test_address_normalization():
     """測試地址標準化"""
-    normalizer = TaiwanAddressNormalizer()
+    print("測試混合式地址標準化功能（規則 + DSPy AI）：\n")
+    
+    # 測試 AI 模式
+    normalizer_ai = TaiwanAddressNormalizer(use_ai=True)
+    
+    # 測試純規則模式
+    normalizer_rules = TaiwanAddressNormalizer(use_ai=False)
     
     test_cases = [
-        # 測試區域補全
+        # 簡單案例（規則可處理）
+        ("新北市板橋區文化路一段100號", "新北市板橋區文化路一段100號"),
+        
+        # 不完整地址（需要 AI）
         ("士林區文林路100號", "臺北市士林區文林路100號"),
         ("中壢區中大路300號", "桃園市中壢區中大路300號"),
-        ("大安區羅斯福路四段1號", "臺北市大安區羅斯福路四段1號"),
         
-        # 測試舊地名更新
+        # 舊地名（需要 AI）
         ("桃園縣中壢市中大路300號", "桃園市中壢區中大路300號"),
         ("台中縣豐原市中正路1號", "臺中市豐原區中正路1號"),
-        ("台南縣永康市中正路529號", "臺南市永康區中正路529號"),
-        ("高雄縣鳳山市光復路二段132號", "高雄市鳳山區光復路二段132號"),
         
-        # 測試台→臺轉換
-        ("台北市信義區信義路五段7號", "臺北市信義區信義路五段7號"),
-        ("台中市西屯區台灣大道三段99號", "臺中市西屯區臺灣大道三段99號"),
-        
-        # 測試完整地址
-        ("新北市板橋區文化路一段100號", "新北市板橋區文化路一段100號"),
-        ("桃園市桃園區縣府路1號", "桃園市桃園區縣府路1號"),
+        # 複雜案例
+        ("台北信義區市府路1號", "臺北市信義區市府路1號"),
+        ("高雄鳳山光復路132號", "高雄市鳳山區光復路132號"),
     ]
     
-    print("測試地址標準化功能：\n")
     for original, expected in test_cases:
-        result = normalizer.normalize_address(original)
-        status = "✓" if result == expected else "✗"
-        print(f"{status} 原始: {original}")
-        print(f"  預期: {expected}")
-        print(f"  結果: {result}")
+        print(f"原始地址: {original}")
+        
+        # AI 模式結果
+        result_ai = normalizer_ai.normalize_address(original)
+        status_ai = "✓" if result_ai == expected else "✗"
+        print(f"  {status_ai} AI 模式: {result_ai}")
+        
+        # 規則模式結果
+        result_rules = normalizer_rules.normalize_address(original)
+        status_rules = "✓" if result_rules == expected else "✗"
+        print(f"  {status_rules} 規則模式: {result_rules}")
+        
+        print(f"  預期結果: {expected}")
         print()
 
 
