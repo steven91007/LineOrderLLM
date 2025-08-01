@@ -12,6 +12,7 @@ from .dspy_modules.order_classifier import OrderTypeClassifier
 from .dspy_modules.single_parser import SingleOrderParser
 from .dspy_modules.multi_parser import MultiOrderParser
 from .dspy_modules.validators import OrderValidator, JSONValidator
+from .dspy_modules.item_parser import item_parser
 
 
 class DSPyOrderClient:
@@ -138,12 +139,46 @@ class DSPyOrderClient:
     def _parse_single_order(self, order_text: str) -> Dict[str, Any]:
         """解析單一訂單"""
         result = self.single_parser(order_text)
-        return result.order_json
+        parsed_data = result.order_json
+        
+        # 使用 ItemParser 重新解析商品項目以保留數字編號
+        if 'items' in parsed_data and parsed_data['items']:
+            try:
+                # 將商品項目轉回文字格式供 ItemParser 處理
+                items_text = self._items_to_text(parsed_data['items'])
+                if items_text:
+                    item_result = item_parser(items_text)
+                    import json
+                    parsed_items = json.loads(item_result.items_json)
+                    parsed_data['items'] = parsed_items
+            except Exception:
+                # ItemParser 失敗時保持原有結果
+                pass
+        
+        return parsed_data
     
     def _parse_multiple_orders(self, order_text: str) -> Dict[str, Any]:
         """解析多訂單"""
         result = self.multi_parser(order_text)
-        return result.orders_json
+        parsed_data = result.orders_json
+        
+        # 使用 ItemParser 重新解析每個訂單的商品項目
+        if 'orders' in parsed_data and isinstance(parsed_data['orders'], list):
+            for order in parsed_data['orders']:
+                if 'items' in order and order['items']:
+                    try:
+                        # 將商品項目轉回文字格式供 ItemParser 處理
+                        items_text = self._items_to_text(order['items'])
+                        if items_text:
+                            item_result = item_parser(items_text)
+                            import json
+                            parsed_items = json.loads(item_result.items_json)
+                            order['items'] = parsed_items
+                    except Exception:
+                        # ItemParser 失敗時保持原有結果
+                        pass
+        
+        return parsed_data
     
     def _validate_parsed_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """驗證解析後的資料"""
@@ -364,3 +399,21 @@ class DSPyOrderClient:
                     order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
         
         return result
+    
+    def _items_to_text(self, items: List[Dict[str, Any]]) -> str:
+        """將商品項目列表轉回文字格式供 ItemParser 重新解析"""
+        if not items or not isinstance(items, list):
+            return ""
+        
+        item_texts = []
+        for item in items:
+            if isinstance(item, dict) and 'name' in item and 'quantity' in item:
+                name = item['name']
+                quantity = item['quantity']
+                # 嘗試重建原始格式
+                if quantity == 1:
+                    item_texts.append(name)
+                else:
+                    item_texts.append(f"{name} x{quantity}")
+        
+        return ", ".join(item_texts)
