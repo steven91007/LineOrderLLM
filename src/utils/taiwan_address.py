@@ -3,12 +3,15 @@
 """
 import re
 from typing import Dict, List, Optional, Tuple
+from .dspy_modules.address_normalizer import address_normalizer
 
 
 class TaiwanAddressNormalizer:
     """台灣地址標準化處理器"""
     
-    def __init__(self):
+    def __init__(self, use_ai: bool = True):
+        self.use_ai = use_ai
+        
         # 縣市對照表（包含直轄市）
         self.cities = {
             # 直轄市
@@ -206,7 +209,7 @@ class TaiwanAddressNormalizer:
     
     def normalize_address(self, address: str) -> str:
         """
-        標準化地址格式
+        標準化地址格式（混合式：規則 + AI）
         
         Args:
             address: 原始地址字串
@@ -217,6 +220,50 @@ class TaiwanAddressNormalizer:
         if not address:
             return address
         
+        # 如果啟用 AI 且地址比較複雜，使用 DSPy 處理
+        if self.use_ai and self._is_complex_address(address):
+            try:
+                result = address_normalizer(address)
+                ai_normalized = result.normalized_address
+                
+                # AI 處理後再用規則進行後處理
+                return self._post_process_with_rules(ai_normalized)
+            except Exception:
+                # AI 失敗時 fallback 到規則處理
+                pass
+        
+        # 規則處理
+        return self._normalize_with_rules(address)
+    
+    def _is_complex_address(self, address: str) -> bool:
+        """判斷是否為需要 AI 處理的複雜地址"""
+        complex_indicators = [
+            # 包含舊地名
+            '桃園縣', '台中縣', '臺中縣', '台南縣', '臺南縣', '高雄縣',
+            # 不完整地址（只有區域名）
+            r'^[^市縣]+區(?!.*[市縣])',
+            # 包含錯別字的可能性
+            '臺', '台',
+            # 不標準格式
+            r'^\s*[一二三四五六七八九十]+\s*[、，。]',
+        ]
+        
+        for indicator in complex_indicators:
+            if isinstance(indicator, str):
+                if indicator in address:
+                    return True
+            else:  # regex pattern
+                if re.search(indicator, address):
+                    return True
+        
+        # 地址太短可能不完整，需要 AI 判斷
+        if len(address.strip()) < 8:
+            return True
+            
+        return False
+    
+    def _normalize_with_rules(self, address: str) -> str:
+        """純規則處理地址標準化"""
         # 移除多餘空白
         address = ' '.join(address.split())
         
@@ -231,6 +278,19 @@ class TaiwanAddressNormalizer:
         
         # 補全地址
         address = self._complete_address(address)
+        
+        return address
+    
+    def _post_process_with_rules(self, address: str) -> str:
+        """AI 處理後的規則後處理"""
+        if not address:
+            return address
+            
+        # 確保統一用字
+        address = address.replace('台北', '臺北').replace('台中', '臺中').replace('台南', '臺南').replace('台東', '臺東')
+        
+        # 移除多餘空白
+        address = ' '.join(address.split())
         
         return address
     
