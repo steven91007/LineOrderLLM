@@ -221,7 +221,7 @@ class TaiwanAddressNormalizer:
             return address
         
         # 如果啟用 AI 且地址比較複雜，使用 DSPy 處理
-        if self.use_ai and self._is_complex_address(address):
+        if self.use_ai:
             try:
                 result = address_normalizer(address)
                 ai_normalized = result.normalized_address
