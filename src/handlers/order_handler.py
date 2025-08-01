@@ -21,15 +21,15 @@ from ..utils.google_sheets_client import GoogleSheetsClient
 
 
 class OrderHandler:
-    def __init__(self, configuration, authorized_users, client_type='openai', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None):
+    def __init__(self, configuration, authorized_users, client_type='dspy', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None):
         self.configuration = configuration
         self.authorized_users = authorized_users
         self.order_sessions = {}  # 存儲用戶的訂單處理狀態
         self.client_type = client_type
         
         # 初始化訂單解析客戶端
-        if client_type == 'dspy' and dspy_api_key:
-            self.order_client = DSPyOrderClient(dspy_api_key, dspy_model, dspy_max_retries)
+        if client_type == 'dspy' and openai_api_key:
+            self.order_client = DSPyOrderClient(openai_api_key)
         elif openai_api_key:
             self.order_client = OpenAIClient(openai_api_key, openai_model)
         else:

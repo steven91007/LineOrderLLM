@@ -75,6 +75,11 @@ class MultiOrderParser(dspy.Module):
 
 {order_text}
 
+多訂單定義：
+- 多訂單是指文字中包含多個不同的收件人或多個不同的收件地址
+- 每個收件人/地址對應一份獨立的訂單
+- 如果只有一個收件人和一個地址，即使有多個商品，也是單一訂單
+
 解析規則：
 1. 每份訂單的寄件人資訊（sender_name, sender_phone）為選填，可設為 null
 2. 每份訂單的收件人資訊（receiver_name, receiver_phone）為必填
@@ -85,7 +90,7 @@ class MultiOrderParser(dspy.Module):
 
 輸出格式要求：
 - order_type: "multiple"
-- total_orders: 訂單總數
+- total_orders: 訂單總數（根據不同收件人或地址的數量）
 - orders: 訂單陣列，每個訂單包含 order_index
 
 輸出必須是有效的 JSON 格式。"""
