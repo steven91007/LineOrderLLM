@@ -86,20 +86,16 @@ class OrderHandler:
             if user_id in self.order_sessions:
                 del self.order_sessions[user_id]
             self._reply_text(event, "已取消訂單處理。")
-        elif action == 'confirm_single_order':
-            # 確認單一訂單
-            self._confirm_single_order(event)
-        elif action == 'confirm_order_at_index':
-            # 確認特定索引的訂單
+        elif action == 'confirm_order':
+            # 確認訂單
             order_index = data.get('order_index', 1)
-            self._confirm_order_at_index(event, order_index)
-        elif action == 'show_order_at_index':
-            # 顯示特定索引的訂單
-            order_index = data.get('order_index', 1)
-            self._show_order_at_index(event, order_index)
-        elif action == 'confirm_all_orders':
-            # 確認所有訂單
-            self._confirm_all_orders(event)
+            self._confirm_order(event, order_index)
+        elif action == 'show_orders_confirmation':
+            # 顯示訂單確認介面
+            self._show_orders_confirmation_from_postback(event)
+        elif action == 'confirm_all_orders_batch':
+            # 批量確認所有訂單（新版）
+            self._confirm_all_orders_batch(event)
         elif action == 'retry_single_order':
             # 建議單筆輸入
             self._reply_text_with_retry_option(event, 
@@ -160,15 +156,9 @@ class OrderHandler:
                     # 儲存解析結果
                     self.order_sessions[user_id]['data']['parsed'] = parsed_data
                     
-                    # 根據訂單類型顯示不同的確認介面
-                    order_type = parsed_data.get('order_type', 'single')
-                    if order_type == 'single':
-                        self.order_sessions[user_id]['status'] = 'confirming_single'
-                        self._show_single_order_confirmation(event, parsed_data)
-                    elif order_type == 'multiple':
-                        self.order_sessions[user_id]['status'] = 'confirming_multiple'
-                        self.order_sessions[user_id]['data']['current_order_index'] = 1
-                        self._show_multiple_orders_overview(event, parsed_data)
+                    # 統一顯示訂單確認介面（使用 Flex Message 輪播）
+                    self.order_sessions[user_id]['status'] = 'confirming'
+                    self._show_orders_confirmation(event, parsed_data)
                 else:
                     # 顯示驗證錯誤
                     self._handle_validation_error(event, validation)
@@ -191,97 +181,202 @@ class OrderHandler:
         
         # 如果不是在確認狀態，清除會話
         if (user_id in self.order_sessions and 
-            self.order_sessions[user_id]['status'] not in ['confirming_single', 'confirming_multiple']):
+            self.order_sessions[user_id]['status'] not in ['confirming']):
             del self.order_sessions[user_id]
     
-    def _show_single_order_confirmation(self, event: MessageEvent, parsed_data: Dict[str, Any]) -> None:
-        """顯示單一訂單確認"""
-        order_summary = self._format_single_order_summary(parsed_data)
-        
-        with ApiClient(self.configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            
-            buttons_template = ButtonsTemplate(
-                text=order_summary[:300],  # LINE 有字數限制
-                actions=[
-                    PostbackAction(
-                        label='確認訂單',
-                        data=json.dumps({'action': 'confirm_single_order'})
-                    ),
-                    PostbackAction(
-                        label='重新輸入',
-                        data=json.dumps({'action': 'start_order'})
-                    ),
-                    PostbackAction(
-                        label='取消',
-                        data=json.dumps({'action': 'cancel_order'})
-                    )
-                ]
-            )
-            
-            template_message = TemplateMessage(
-                alt_text='訂單確認',
-                template=buttons_template
-            )
-            
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[template_message]
-                )
-            )
-    
-    def _show_multiple_orders_overview(self, event: MessageEvent, parsed_data: Dict[str, Any]) -> None:
-        """顯示多訂單總覽"""
+    def _show_orders_confirmation(self, event: MessageEvent, parsed_data: Dict[str, Any]) -> None:
+        """顯示訂單確認介面（使用 Flex Message 輪播）"""
         orders = parsed_data.get('orders', [])
-        total_orders = parsed_data.get('total_orders', 0)
+        total_orders = len(orders)
         
-        overview_text = f"🎉 發現 {total_orders} 份訂單！\n\n"
+        if total_orders == 0:
+            self._reply_text(event, "沒有找到有效的訂單資料。")
+            return
+        
+        # 創建 Flex Message 輪播
+        flex_bubbles = []
         for i, order in enumerate(orders, 1):
-            receiver_name = order.get('receiver_name', 'N/A')
-            items_count = len(order.get('items', []))
-            overview_text += f"📋 訂單 {i}: {receiver_name} ({items_count} 項商品)\n"
+            bubble = self._create_order_flex_bubble(order, i, total_orders)
+            flex_bubbles.append(bubble)
         
-        overview_text += "\n請選擇操作方式："
+        # 添加最後一頁：確認全部訂單
+        confirm_all_bubble = self._create_confirm_all_bubble(total_orders)
+        flex_bubbles.append(confirm_all_bubble)
+        
+        # 構建 Flex Carousel
+        flex_carousel = {
+            "type": "carousel",
+            "contents": flex_bubbles
+        }
         
         with ApiClient(self.configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             
-            buttons_template = ButtonsTemplate(
-                text=overview_text,
-                actions=[
-                    PostbackAction(
-                        label='逐一確認',
-                        data=json.dumps({
-                            'action': 'show_order_at_index',
-                            'order_index': 1
-                        })
-                    ),
-                    PostbackAction(
-                        label='全部確認',
-                        data=json.dumps({'action': 'confirm_all_orders'})
-                    ),
-                    PostbackAction(
-                        label='重新輸入',
-                        data=json.dumps({'action': 'start_order'})
-                    )
-                ]
-            )
-            
-            template_message = TemplateMessage(
-                alt_text='多訂單總覽',
-                template=buttons_template
+            flex_message = FlexMessage(
+                alt_text=f'訂單確認 ({total_orders} 份)',
+                contents=FlexContainer.from_dict(flex_carousel)
             )
             
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[template_message]
+                    messages=[flex_message]
                 )
             )
     
-    def _show_order_at_index(self, event: PostbackEvent, order_index: int) -> None:
-        """顯示特定索引的訂單詳情"""
+    def _create_order_flex_bubble(self, order: Dict[str, Any], order_index: int, total_orders: int) -> Dict[str, Any]:
+        """創建單一訂單的 Flex Bubble"""
+        # 格式化商品列表
+        items_text = ""
+        for item in order.get('items', []):
+            items_text += f"• {item['name']} x{item['quantity']}\n"
+        
+        # 處理可選的寄件人資訊（分開顯示）
+        sender_info = ""
+        if order.get('sender_name') or order.get('sender_phone'):
+            if order.get('sender_name'):
+                sender_info += f"寄件人: {order['sender_name']}\n"
+            if order.get('sender_phone'):
+                sender_info += f"寄件人電話: {order['sender_phone']}\n"
+            sender_info += "\n"
+        
+        bubble = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"訂單 {order_index}/{total_orders}",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#1DB446"
+                    }
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"{sender_info}收件人: {order.get('receiver_name', 'N/A')}\n收件人電話: {order.get('receiver_phone', 'N/A')}\n\n商品:\n{items_text.strip()}\n\n地址: {order.get('shipping_address', 'N/A')}",
+                        "wrap": True,
+                        "size": "sm"
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "height": "sm",
+                        "action": {
+                            "type": "postback",
+                            "label": "確認此訂單",
+                            "data": json.dumps({
+                                "action": "confirm_order",
+                                "order_index": order_index
+                            })
+                        }
+                    }
+                ]
+            }
+        }
+        
+        # 如果發貨日期存在，添加到內容中
+        if order.get('shipping_date'):
+            bubble["body"]["contents"][0]["text"] = bubble["body"]["contents"][0]["text"].replace(
+                f"\n\n地址: {order.get('shipping_address', 'N/A')}",
+                f"\n\n發貨日期: {order['shipping_date']}\n地址: {order.get('shipping_address', 'N/A')}"
+            )
+        
+        return bubble
+    
+    def _create_confirm_all_bubble(self, total_orders: int) -> Dict[str, Any]:
+        """創建確認全部訂單的 Flex Bubble"""
+        bubble = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✅ 確認全部訂單",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#1DB446"
+                    }
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"📋 共 {total_orders} 份訂單\n\n請確認前面所有訂單資訊無誤後，點擊下方按鈕一次性提交全部訂單到系統。\n\n⚠️ 提交後將無法修改，請仔細核對。",
+                        "wrap": True,
+                        "size": "sm"
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "height": "sm",
+                        "color": "#1DB446",
+                        "action": {
+                            "type": "postback",
+                            "label": "確認全部訂單無誤",
+                            "data": json.dumps({
+                                "action": "confirm_all_orders_batch"
+                            })
+                        }
+                    },
+                    {
+                        "type": "button",
+                        "style": "secondary",
+                        "height": "sm",
+                        "action": {
+                            "type": "postback",
+                            "label": "重新檢查",
+                            "data": json.dumps({
+                                "action": "start_order"
+                            })
+                        }
+                    }
+                ]
+            }
+        }
+        
+        return bubble
+    
+    def _show_orders_confirmation_from_postback(self, event: PostbackEvent) -> None:
+        """從 postback 顯示訂單確認介面"""
+        user_id = event.source.user_id
+        
+        if (user_id not in self.order_sessions or 
+            'parsed' not in self.order_sessions[user_id].get('data', {})):
+            self._reply_text(event, "找不到訂單資料，請重新開始。")
+            return
+        
+        parsed_data = self.order_sessions[user_id]['data']['parsed']
+        self._show_orders_confirmation(event, parsed_data)
+    
+    def _confirm_order(self, event: PostbackEvent, order_index: int) -> None:
+        """統一確認訂單方法"""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -291,65 +386,28 @@ class OrderHandler:
         
         parsed_data = self.order_sessions[user_id]['data']['parsed']
         orders = parsed_data.get('orders', [])
-        total_orders = len(orders)
         
-        if order_index < 1 or order_index > total_orders:
+        if order_index < 1 or order_index > len(orders):
             self._reply_text(event, "訂單索引錯誤。")
             return
         
-        current_order = orders[order_index - 1]
-        order_summary = f"📋 訂單 {order_index}/{total_orders}\n\n"
-        order_summary += self._format_single_order_summary(current_order)
+        order_data = orders[order_index - 1]
+        self._save_order_to_sheets(event, order_data, order_index)
         
-        # 準備按鈕
-        actions = [
-            PostbackAction(
-                label='確認此訂單',
-                data=json.dumps({
-                    'action': 'confirm_order_at_index',
-                    'order_index': order_index
-                })
-            )
-        ]
-        
-        # 導航按鈕
-        if order_index > 1:
-            actions.append(PostbackAction(
-                label=f'上一份 ({order_index-1})',
-                data=json.dumps({
-                    'action': 'show_order_at_index',
-                    'order_index': order_index - 1
-                })
-            ))
-        
+        # 檢查是否還有其他訂單需要確認
+        total_orders = len(orders)
         if order_index < total_orders:
-            actions.append(PostbackAction(
-                label=f'下一份 ({order_index+1})',
-                data=json.dumps({
-                    'action': 'show_order_at_index',
-                    'order_index': order_index + 1
-                })
-            ))
-        
-        with ApiClient(self.configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            
-            buttons_template = ButtonsTemplate(
-                text=order_summary[:300],
-                actions=actions[:3]  # LINE 最多 3 個按鈕
+            # 繼續下一份訂單
+            self._reply_text(event, 
+                f"✅ 訂單 {order_index} 已確認！\n\n"
+                f"還有 {total_orders - order_index} 份訂單待確認。"
             )
-            
-            template_message = TemplateMessage(
-                alt_text=f'訂單 {order_index} 詳情',
-                template=buttons_template
-            )
-            
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[template_message]
-                )
-            )
+        else:
+            # 所有訂單都確認完畢
+            self._reply_text(event, "🎉 所有訂單都已確認完成！")
+            if user_id in self.order_sessions:
+                del self.order_sessions[user_id]
+    
     
     def _format_single_order_summary(self, order_data: Dict[str, Any]) -> str:
         """格式化單一訂單摘要"""
@@ -450,84 +508,8 @@ class OrderHandler:
         
         self._reply_text(event, text)
     
-    def _confirm_single_order(self, event: PostbackEvent) -> None:
-        """確認單一訂單"""
-        user_id = event.source.user_id
-        
-        if (user_id not in self.order_sessions or 
-            'parsed' not in self.order_sessions[user_id].get('data', {})):
-            self._reply_text(event, "找不到訂單資料，請重新開始。")
-            return
-        
-        parsed_data = self.order_sessions[user_id]['data']['parsed']
-        self._save_order_to_sheets(event, parsed_data, 1)
-        
-        # 清除會話狀態
-        if user_id in self.order_sessions:
-            del self.order_sessions[user_id]
     
-    def _confirm_order_at_index(self, event: PostbackEvent, order_index: int) -> None:
-        """確認特定索引的訂單"""
-        user_id = event.source.user_id
-        
-        if (user_id not in self.order_sessions or 
-            'parsed' not in self.order_sessions[user_id].get('data', {})):
-            self._reply_text(event, "找不到訂單資料，請重新開始。")
-            return
-        
-        parsed_data = self.order_sessions[user_id]['data']['parsed']
-        orders = parsed_data.get('orders', [])
-        
-        if order_index < 1 or order_index > len(orders):
-            self._reply_text(event, "訂單索引錯誤。")
-            return
-        
-        order_data = orders[order_index - 1]
-        self._save_order_to_sheets(event, order_data, order_index)
-        
-        # 檢查是否還有其他訂單需要確認
-        total_orders = len(orders)
-        if order_index < total_orders:
-            # 繼續下一份訂單
-            self._reply_text(event, 
-                f"✅ 訂單 {order_index} 已確認！\n\n"
-                f"還有 {total_orders - order_index} 份訂單待確認。"
-            )
-        else:
-            # 所有訂單都確認完畢
-            self._reply_text(event, "🎉 所有訂單都已確認完成！")
-            if user_id in self.order_sessions:
-                del self.order_sessions[user_id]
     
-    def _confirm_all_orders(self, event: PostbackEvent) -> None:
-        """確認所有訂單"""
-        user_id = event.source.user_id
-        
-        if (user_id not in self.order_sessions or 
-            'parsed' not in self.order_sessions[user_id].get('data', {})):
-            self._reply_text(event, "找不到訂單資料，請重新開始。")
-            return
-        
-        parsed_data = self.order_sessions[user_id]['data']['parsed']
-        orders = parsed_data.get('orders', [])
-        
-        success_count = 0
-        for i, order_data in enumerate(orders, 1):
-            if self._save_order_to_sheets_silent(order_data, i):
-                success_count += 1
-        
-        total_orders = len(orders)
-        if success_count == total_orders:
-            self._reply_text(event, f"🎉 已成功建立 {total_orders} 份訂單！")
-        else:
-            self._reply_text(event, 
-                f"⚠️ 已成功建立 {success_count}/{total_orders} 份訂單。\n"
-                f"部分訂單可能建立失敗，請檢查 Google Sheets。"
-            )
-        
-        # 清除會話狀態
-        if user_id in self.order_sessions:
-            del self.order_sessions[user_id]
     
     def _save_order_to_sheets(self, event: PostbackEvent, order_data: Dict[str, Any], order_index: int = 1) -> None:
         """儲存訂單到 Google Sheets 並回覆結果"""
@@ -574,3 +556,73 @@ class OrderHandler:
             return result['success']
         
         return True  # 如果沒有設定 Google Sheets，視為成功
+    
+    def _confirm_all_orders_batch(self, event: PostbackEvent) -> None:
+        """批量確認所有訂單（新版）"""
+        user_id = event.source.user_id
+        
+        if (user_id not in self.order_sessions or 
+            'parsed' not in self.order_sessions[user_id].get('data', {})):
+            self._reply_text(event, "找不到訂單資料，請重新開始。")
+            return
+        
+        parsed_data = self.order_sessions[user_id]['data']['parsed']
+        orders = parsed_data.get('orders', [])
+        
+        if not orders:
+            self._reply_text(event, "沒有找到有效的訂單資料。")
+            return
+        
+        success_count = 0
+        failed_orders = []
+        order_ids = []
+        
+        # 批量處理所有訂單
+        for i, order_data in enumerate(orders, 1):
+            # 產生訂單編號
+            order_id = f"ORD-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+            order_data['order_id'] = order_id
+            
+            if self.sheets_client:
+                result = self.sheets_client.append_order(order_data)
+                if result['success']:
+                    success_count += 1
+                    order_ids.append(order_id)
+                else:
+                    failed_orders.append(f"訂單 {i}")
+            else:
+                # 沒有設定 Google Sheets，視為成功
+                success_count += 1
+                order_ids.append(order_id)
+        
+        total_orders = len(orders)
+        
+        if success_count == total_orders:
+            # 全部成功
+            success_message = (
+                f"🎉 批量提交成功！\n\n"
+                f"✅ 已成功建立 {total_orders} 份訂單\n\n"
+                f"📋 訂單編號：\n"
+            )
+            
+            for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
+                receiver_name = order.get('receiver_name', 'N/A')
+                success_message += f"• {order_id} ({receiver_name})\n"
+            
+            success_message += f"\n🗂️ 所有訂單已記錄在 Google Sheets 中。"
+            
+            self._reply_text(event, success_message)
+        else:
+            # 部分失敗
+            error_message = (
+                f"⚠️ 批量提交結果\n\n"
+                f"✅ 成功：{success_count}/{total_orders} 份訂單\n"
+                f"❌ 失敗：{', '.join(failed_orders)}\n\n"
+                f"請檢查失敗的訂單並重新提交。"
+            )
+            
+            self._reply_text(event, error_message)
+        
+        # 清除會話狀態
+        if user_id in self.order_sessions:
+            del self.order_sessions[user_id]

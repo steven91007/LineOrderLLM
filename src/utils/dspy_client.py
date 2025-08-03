@@ -5,14 +5,15 @@ import dspy
 import json
 from typing import Dict, Any, List
 import re
+import mlflow
+
+# 設定 MLflow 實驗名稱
+mlflow.set_experiment("line_order_experiment")
 
 from .taiwan_address import TaiwanAddressNormalizer
 
-from .dspy_modules.order_classifier import OrderTypeClassifier
-from .dspy_modules.single_parser import SingleOrderParser
-from .dspy_modules.multi_parser import MultiOrderParser
+from .dspy_modules.unified_parser import UnifiedOrderParser
 from .dspy_modules.validators import OrderValidator, JSONValidator
-from .dspy_modules.item_parser import item_parser
 
 
 class DSPyOrderClient:
@@ -35,9 +36,7 @@ class DSPyOrderClient:
         self._configure_dspy()
         
         # 初始化模組
-        self.classifier = OrderTypeClassifier()
-        self.single_parser = SingleOrderParser()
-        self.multi_parser = MultiOrderParser()
+        self.unified_parser = UnifiedOrderParser()
         self.validator = OrderValidator()
         self.json_validator = JSONValidator()
         self.address_normalizer = TaiwanAddressNormalizer()
@@ -55,7 +54,7 @@ class DSPyOrderClient:
     
     def parse_order(self, order_text: str) -> Dict[str, Any]:
         """
-        解析訂單文字（支援單一和多訂單）
+        解析訂單文字（統一處理，都返回陣列格式）
         
         Args:
             order_text: 原始訂單文字
@@ -67,8 +66,7 @@ class DSPyOrderClient:
             return {
                 'success': False,
                 'error': '訂單文字不能為空',
-                'data': None,
-                'suggestion': 'single_order'
+                'data': None
             }
         
         # 預處理文字
@@ -77,27 +75,28 @@ class DSPyOrderClient:
         # 執行解析流程
         for attempt in range(self.max_retries):
             try:
-                # 步驟 1: 識別訂單類型
-                order_type = self._classify_order_type(cleaned_text)
+                # 使用統一解析器解析
+                result = self.unified_parser(cleaned_text)
+                parsed_orders = json.loads(result.orders_json)
                 
-                # 步驟 2: 根據類型進行解析
-                if order_type == 'single':
-                    parsed_data = self._parse_single_order(cleaned_text)
-                elif order_type == 'multiple':
-                    parsed_data = self._parse_multiple_orders(cleaned_text)
-                else:
-                    # 預設為單一訂單
-                    parsed_data = self._parse_single_order(cleaned_text)
+                # 確保是陣列格式
+                if not isinstance(parsed_orders, list):
+                    parsed_orders = []
                 
-                # 步驟 3: 驗證解析結果
-                validation_result = self._validate_parsed_data(parsed_data)
+                # 驗證解析結果
+                validation_result = self._validate_parsed_orders(parsed_orders)
                 
                 if validation_result['is_valid']:
-                    parsed_data = self._normalize_addresses_in_result(parsed_data)
+                    # 標準化地址
+                    normalized_orders = self._normalize_addresses_in_orders(parsed_orders)
+                    
                     return {
                         'success': True,
-                        'data': parsed_data,
-                        'raw_response': json.dumps(parsed_data, ensure_ascii=False)
+                        'data': {
+                            'orders': normalized_orders,
+                            'total_orders': len(normalized_orders)
+                        },
+                        'raw_response': json.dumps(normalized_orders, ensure_ascii=False)
                     }
                 else:
                     # 驗證失敗，但如果是最後一次嘗試，回傳錯誤
@@ -105,8 +104,7 @@ class DSPyOrderClient:
                         return {
                             'success': False,
                             'error': f"驗證失敗: {validation_result.get('error_message', '未知錯誤')}",
-                            'data': None,
-                            'suggestion': 'single_order'
+                            'data': None
                         }
                 
             except Exception as e:
@@ -115,74 +113,105 @@ class DSPyOrderClient:
                     return {
                         'success': False,
                         'error': f'DSPy 解析失敗: {str(e)}',
-                        'data': None,
-                        'suggestion': 'single_order'
+                        'data': None
                     }
         
         # 所有嘗試都失敗
         return {
             'success': False,
-            'error': '多次嘗試後仍然解析失敗，請嘗試單筆輸入',
-            'data': None,
-            'suggestion': 'single_order'
+            'error': '多次嘗試後仍然解析失敗，請檢查訂單格式',
+            'data': None
         }
     
-    def _classify_order_type(self, order_text: str) -> str:
-        """分類訂單類型"""
-        try:
-            result = self.classifier(order_text)
-            return result.order_type
-        except Exception:
-            # 分類失敗時的後備邏輯
-            return 'single' if not self._contains_multiple_indicators(order_text) else 'multiple'
+    def _validate_parsed_orders(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """驗證解析後的訂單陣列"""
+        if not isinstance(orders, list):
+            return {
+                'is_valid': False,
+                'error_message': '訂單資料不是陣列格式'
+            }
+        
+        if len(orders) == 0:
+            return {
+                'is_valid': False,
+                'error_message': '沒有找到有效的訂單'
+            }
+        
+        if len(orders) > 5:
+            return {
+                'is_valid': False,
+                'error_message': '訂單數量超過限制（最多5份）'
+            }
+        
+        # 驗證每個訂單
+        for i, order in enumerate(orders):
+            validation = self._validate_single_order_data(order)
+            if not validation['is_valid']:
+                return {
+                    'is_valid': False,
+                    'error_message': f"第{i+1}份訂單驗證失敗: {validation.get('error_message', '未知錯誤')}"
+                }
+        
+        return {'is_valid': True}
     
-    def _parse_single_order(self, order_text: str) -> Dict[str, Any]:
-        """解析單一訂單"""
-        result = self.single_parser(order_text)
-        parsed_data = result.order_json
+    def _validate_single_order_data(self, order: Dict[str, Any]) -> Dict[str, Any]:
+        """驗證單一訂單資料"""
+        if not isinstance(order, dict):
+            return {
+                'is_valid': False,
+                'error_message': '訂單資料不是字典格式'
+            }
         
-        # 使用 ItemParser 重新解析商品項目以保留數字編號
-        if 'items' in parsed_data and parsed_data['items']:
-            try:
-                # 將商品項目轉回文字格式供 ItemParser 處理
-                items_text = self._items_to_text(parsed_data['items'])
-                if items_text:
-                    item_result = item_parser(items_text)
-                    import json
-                    parsed_items = json.loads(item_result.items_json)
-                    parsed_data['items'] = parsed_items
-            except Exception:
-                # ItemParser 失敗時保持原有結果
-                pass
+        # 必填欄位檢查
+        required_fields = ['receiver_name', 'receiver_phone', 'shipping_address', 'items']
+        missing_fields = []
         
-        return parsed_data
-    
-    def _parse_multiple_orders(self, order_text: str) -> Dict[str, Any]:
-        """解析多訂單"""
-        result = self.multi_parser(order_text)
-        parsed_data = result.orders_json
+        for field in required_fields:
+            if not order.get(field):
+                missing_fields.append(field)
         
-        # 使用 ItemParser 重新解析每個訂單的商品項目
-        if 'orders' in parsed_data and isinstance(parsed_data['orders'], list):
-            for order in parsed_data['orders']:
-                if 'items' in order and order['items']:
-                    try:
-                        # 將商品項目轉回文字格式供 ItemParser 處理
-                        items_text = self._items_to_text(order['items'])
-                        if items_text:
-                            item_result = item_parser(items_text)
-                            import json
-                            parsed_items = json.loads(item_result.items_json)
-                            order['items'] = parsed_items
-                    except Exception:
-                        # ItemParser 失敗時保持原有結果
-                        pass
+        if missing_fields:
+            return {
+                'is_valid': False,
+                'error_message': f'缺少必填欄位: {", ".join(missing_fields)}'
+            }
         
-        return parsed_data
-    
-    def _validate_parsed_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證解析後的資料"""
-        return self.validator.validate_order_data(data)
+        # 驗證電話號碼格式
+        phone_pattern = re.compile(r'^[\d\-\+\(\)\s]+$')
+        if order.get('receiver_phone') and not phone_pattern.match(order['receiver_phone']):
+            return {
+                'is_valid': False,
+                'error_message': '收件人電話格式不正確'
+            }
+        
+        if order.get('sender_phone') and not phone_pattern.match(order['sender_phone']):
+            return {
+                'is_valid': False,
+                'error_message': '寄件人電話格式不正確'
+            }
+        
+        # 驗證商品項目
+        items = order.get('items', [])
+        if not isinstance(items, list) or len(items) == 0:
+            return {
+                'is_valid': False,
+                'error_message': '商品項目不能為空'
+            }
+        
+        for item in items:
+            if not isinstance(item, dict) or 'name' not in item or 'quantity' not in item:
+                return {
+                    'is_valid': False,
+                    'error_message': '商品項目格式不正確'
+                }
+            
+            if not isinstance(item['quantity'], (int, float)) or item['quantity'] <= 0:
+                return {
+                    'is_valid': False,
+                    'error_message': '商品數量必須是正數'
+                }
+        
+        return {'is_valid': True}
     
     def _preprocess_text(self, text: str) -> str:
         """預處理訂單文字"""
@@ -205,215 +234,69 @@ class DSPyOrderClient:
         
         return text
     
-    def _contains_multiple_indicators(self, text: str) -> bool:
-        """檢查文字是否包含多訂單指標"""
-        # 檢查是否有多個收件人
-        receiver_patterns = [
-            r'收件人[：:].*?收件人',
-            r'收件人\d+[：:]',
-            r'第[一二三四五]位?收件人',
-            r'第[1-5]位?收件人',
-            r'收件人[1-5][：:]'
-        ]
-        
-        # 檢查是否有多個地址
-        address_patterns = [
-            r'地址[：:].*?地址',
-            r'收件地址[：:].*?收件地址',
-            r'地址\d+[：:]',
-            r'第[一二三四五]個?地址',
-            r'第[1-5]個?地址',
-            r'送[到至].*?[、，].*?送[到至]'
-        ]
-        
-        # 檢查序號標記（1. 2. 或 一、二、）
-        numbering_patterns = [
-            r'^\s*[1-5][.、）]\s*',
-            r'\n\s*[1-5][.、）]\s*',
-            r'^\s*[一二三四五][、.）]\s*',
-            r'\n\s*[一二三四五][、.）]\s*'
-        ]
-        
-        text_lower = text.lower()
-        
-        # 計算各種指標
-        has_multiple_receivers = any(re.search(pattern, text_lower) for pattern in receiver_patterns)
-        has_multiple_addresses = any(re.search(pattern, text_lower) for pattern in address_patterns)
-        has_numbering = sum(1 for pattern in numbering_patterns if re.search(pattern, text, re.MULTILINE)) >= 2
-        
-        # 檢查關鍵字重複次數
-        receiver_count = len(re.findall(r'收件人', text))
-        address_count = len(re.findall(r'地址|收件地址|送[到至]', text))
-        phone_count = len(re.findall(r'電話|手機|聯絡', text))
-        
-        # 判斷是否為多訂單
-        if has_multiple_receivers or has_multiple_addresses:
-            return True
-        
-        if has_numbering and (receiver_count >= 2 or address_count >= 2):
-            return True
-            
-        if receiver_count >= 2 and address_count >= 2:
-            return True
-            
-        if receiver_count >= 2 and phone_count >= 2:
-            return True
-        
-        return False
     
     def validate_parsed_order(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        驗證解析後的訂單資料（與 OpenAI 客戶端相容的介面）
+        驗證解析後的訂單資料（相容性介面）
         
         Args:
-            parsed_data: 解析後的訂單資料
+            parsed_data: 解析後的訂單資料（新格式：{'orders': [...], 'total_orders': N}）
             
         Returns:
             Dict: 驗證結果
         """
-        order_type = parsed_data.get('order_type', 'single')
-        
-        if order_type == 'error':
-            return {
-                'is_valid': False,
-                'error_type': 'parsing_error',
-                'error_message': parsed_data.get('error_message', '解析失敗')
-            }
-        
-        if order_type == 'single':
-            return self._validate_single_order_legacy(parsed_data)
-        elif order_type == 'multiple':
-            return self._validate_multiple_orders_legacy(parsed_data)
-        else:
+        if not isinstance(parsed_data, dict):
             return {
                 'is_valid': False,
                 'error_type': 'invalid_format',
-                'error_message': '未知的訂單類型'
+                'error_message': '訂單資料格式不正確'
             }
-    
-    def _validate_single_order_legacy(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證單一訂單（與舊版相容）"""
-        # 必填欄位（寄件人資訊改為選填）
-        required_fields = [
-            'receiver_name', 'receiver_phone',
-            'items', 'shipping_address'
-        ]
         
-        missing_fields = []
-        for field in required_fields:
-            if not parsed_data.get(field):
-                missing_fields.append(field)
-        
-        # 驗證電話號碼格式
-        invalid_phones = self._validate_phone_numbers_legacy(parsed_data)
-        
-        # 驗證商品項目
-        invalid_items = self._validate_items_legacy(parsed_data.get('items', []))
-        
-        return {
-            'is_valid': len(missing_fields) == 0 and len(invalid_phones) == 0 and not invalid_items,
-            'missing_fields': missing_fields,
-            'invalid_phones': invalid_phones,
-            'invalid_items': invalid_items,
-            'order_type': 'single'
-        }
-    
-    def _validate_multiple_orders_legacy(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證多份訂單（與舊版相容）"""
         orders = parsed_data.get('orders', [])
         total_orders = parsed_data.get('total_orders', 0)
         
-        if not orders or len(orders) != total_orders:
+        if not isinstance(orders, list):
+            return {
+                'is_valid': False,
+                'error_type': 'invalid_format',
+                'error_message': '訂單資料不是陣列格式'
+            }
+        
+        if len(orders) != total_orders:
             return {
                 'is_valid': False,
                 'error_type': 'structure_error',
                 'error_message': '訂單數量不一致'
             }
         
-        if total_orders > 5:
+        # 使用新的驗證方法
+        validation_result = self._validate_parsed_orders(orders)
+        
+        if validation_result['is_valid']:
+            return {
+                'is_valid': True,
+                'order_type': 'unified',
+                'total_orders': len(orders)
+            }
+        else:
             return {
                 'is_valid': False,
-                'error_type': 'limit_exceeded',
-                'error_message': '訂單數量超過限制（最多5份）'
+                'error_type': 'validation_error',
+                'error_message': validation_result.get('error_message', '驗證失敗')
             }
-        
-        # 驗證每份訂單
-        invalid_orders = []
-        for i, order in enumerate(orders):
-            validation = self._validate_single_order_legacy(order)
-            if not validation['is_valid']:
-                invalid_orders.append({
-                    'index': i + 1,
-                    'errors': validation
-                })
-        
-        return {
-            'is_valid': len(invalid_orders) == 0,
-            'invalid_orders': invalid_orders,
-            'total_orders': total_orders,
-            'order_type': 'multiple'
-        }
     
-    def _validate_phone_numbers_legacy(self, data: Dict[str, Any]) -> List[str]:
-        """驗證電話號碼格式（舊版相容）"""
-        phone_pattern = re.compile(r'^[\d\-\+\(\)\s]+$')
-        invalid_phones = []
+    def _normalize_addresses_in_orders(self, orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """標準化訂單陣列中的地址"""
+        normalized_orders = []
         
-        # 寄件人電話（選填）
-        if data.get('sender_phone'):
-            if not phone_pattern.match(data['sender_phone']):
-                invalid_phones.append('sender_phone')
+        for order in orders:
+            if isinstance(order, dict) and 'shipping_address' in order and order['shipping_address']:
+                # 複製訂單以避免修改原始資料
+                normalized_order = order.copy()
+                normalized_order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
+                normalized_orders.append(normalized_order)
+            else:
+                normalized_orders.append(order)
         
-        # 收件人電話（必填）
-        if data.get('receiver_phone'):
-            if not phone_pattern.match(data['receiver_phone']):
-                invalid_phones.append('receiver_phone')
-        
-        return invalid_phones
+        return normalized_orders
     
-    def _validate_items_legacy(self, items: List[Dict[str, Any]]) -> bool:
-        """驗證商品項目（舊版相容）"""
-        if not isinstance(items, list) or len(items) == 0:
-            return True  # 空列表視為無效
-        
-        for item in items:
-            if not isinstance(item, dict) or 'name' not in item or 'quantity' not in item:
-                return True
-        
-        return False
-    
-    def _normalize_addresses_in_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """標準化解析結果中的地址"""
-        order_type = result.get('order_type', 'single')
-        
-        if order_type == 'single':
-            # 處理單一訂單的地址
-            if 'shipping_address' in result and result['shipping_address']:
-                result['shipping_address'] = self.address_normalizer.normalize_address(result['shipping_address'])
-                
-        elif order_type == 'multiple':
-            # 處理多訂單的地址
-            orders = result.get('orders', [])
-            for order in orders:
-                if 'shipping_address' in order and order['shipping_address']:
-                    order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
-        
-        return result
-    
-    def _items_to_text(self, items: List[Dict[str, Any]]) -> str:
-        """將商品項目列表轉回文字格式供 ItemParser 重新解析"""
-        if not items or not isinstance(items, list):
-            return ""
-        
-        item_texts = []
-        for item in items:
-            if isinstance(item, dict) and 'name' in item and 'quantity' in item:
-                name = item['name']
-                quantity = item['quantity']
-                # 嘗試重建原始格式
-                if quantity == 1:
-                    item_texts.append(name)
-                else:
-                    item_texts.append(f"{name} x{quantity}")
-        
-        return ", ".join(item_texts)
