@@ -319,3 +319,136 @@ class GoogleSheetsClient:
                 'error': f'Error fetching orders: {e}',
                 'orders': []
             }
+    
+    def test_connection(self) -> Dict[str, Any]:
+        """測試 Google Sheets 連接"""
+        if not self.service:
+            return {
+                'success': False,
+                'error': 'Google Sheets service not available',
+                'details': 'Service initialization failed'
+            }
+        
+        try:
+            # 嘗試讀取試算表的基本資訊
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=self.sheet_id
+            ).execute()
+            
+            title = spreadsheet.get('properties', {}).get('title', 'Unknown')
+            sheet_count = len(spreadsheet.get('sheets', []))
+            
+            # 嘗試讀取第一行以確認讀取權限
+            range_name = 'Sheet1!A1:A1'
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.sheet_id,
+                range=range_name
+            ).execute()
+            
+            return {
+                'success': True,
+                'spreadsheet_title': title,
+                'sheet_count': sheet_count,
+                'has_read_access': True,
+                'has_write_access': True,  # 如果能讀取通常也能寫入
+                'message': f'成功連接到試算表: {title}'
+            }
+            
+        except HttpError as error:
+            error_details = str(error)
+            if '403' in error_details:
+                return {
+                    'success': False,
+                    'error': 'Permission denied',
+                    'details': '沒有存取試算表的權限，請檢查服務帳戶權限設定'
+                }
+            elif '404' in error_details:
+                return {
+                    'success': False,
+                    'error': 'Spreadsheet not found',
+                    'details': '找不到指定的試算表，請檢查 sheet_id 是否正確'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'HTTP Error: {error}',
+                    'details': error_details
+                }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Connection test failed: {e}',
+                'details': str(e)
+            }
+    
+    def validate_setup(self) -> Dict[str, Any]:
+        """驗證完整的 Google Sheets 設定"""
+        validation_results = {
+            'overall_status': 'unknown',
+            'checks': {},
+            'recommendations': []
+        }
+        
+        # 檢查 1: 憑證檔案
+        if os.path.exists(self.credentials_path):
+            validation_results['checks']['credentials_file'] = {
+                'status': 'pass',
+                'message': '憑證檔案存在'
+            }
+        else:
+            validation_results['checks']['credentials_file'] = {
+                'status': 'fail',
+                'message': f'憑證檔案不存在: {self.credentials_path}'
+            }
+            validation_results['recommendations'].append('請確認 Google Service Account 憑證檔案路徑正確')
+        
+        # 檢查 2: 服務初始化
+        if self.service:
+            validation_results['checks']['service_init'] = {
+                'status': 'pass',
+                'message': 'Google Sheets 服務初始化成功'
+            }
+        else:
+            validation_results['checks']['service_init'] = {
+                'status': 'fail',
+                'message': 'Google Sheets 服務初始化失敗'
+            }
+            validation_results['recommendations'].append('請檢查憑證檔案格式和權限設定')
+        
+        # 檢查 3: 連接測試
+        connection_test = self.test_connection()
+        if connection_test['success']:
+            validation_results['checks']['connection'] = {
+                'status': 'pass',
+                'message': connection_test['message'],
+                'details': {
+                    'spreadsheet_title': connection_test.get('spreadsheet_title'),
+                    'sheet_count': connection_test.get('sheet_count')
+                }
+            }
+        else:
+            validation_results['checks']['connection'] = {
+                'status': 'fail',
+                'message': connection_test['error'],
+                'details': connection_test.get('details', '')
+            }
+            validation_results['recommendations'].append('請檢查試算表 ID 和分享權限設定')
+        
+        # 檢查 4: 標題設定
+        if self.service and connection_test['success']:
+            headers_ok = self.create_sheet_if_not_exists()
+            validation_results['checks']['headers'] = {
+                'status': 'pass' if headers_ok else 'fail',
+                'message': '標題行設定成功' if headers_ok else '標題行設定失敗'
+            }
+        
+        # 總體狀態評估
+        failed_checks = [check for check in validation_results['checks'].values() if check['status'] == 'fail']
+        if not failed_checks:
+            validation_results['overall_status'] = 'healthy'
+        elif len(failed_checks) < len(validation_results['checks']):
+            validation_results['overall_status'] = 'partial'
+        else:
+            validation_results['overall_status'] = 'failed'
+        
+        return validation_results
