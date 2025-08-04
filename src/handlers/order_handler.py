@@ -62,6 +62,9 @@ class OrderHandler:
         elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'waiting_order_text':
             # 用戶正在輸入訂單內容
             self._process_order_text(event)
+        elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'editing_order':
+            # 用戶正在編輯訂單
+            self._process_order_edit(event)
     
     def handle_postback(self, event: PostbackEvent) -> None:
         """處理按鈕回應"""
@@ -86,16 +89,16 @@ class OrderHandler:
             if user_id in self.order_sessions:
                 del self.order_sessions[user_id]
             self._reply_text(event, "已取消訂單處理。")
-        elif action == 'confirm_order':
-            # 確認訂單
-            order_index = data.get('order_index', 1)
-            self._confirm_order(event, order_index)
         elif action == 'show_orders_confirmation':
             # 顯示訂單確認介面
             self._show_orders_confirmation_from_postback(event)
         elif action == 'confirm_all_orders_batch':
             # 批量確認所有訂單（新版）
             self._confirm_all_orders_batch(event)
+        elif action == 'edit_order':
+            # 編輯訂單
+            order_index = data.get('order_index', 1)
+            self._edit_order(event, order_index)
         elif action == 'retry_single_order':
             # 建議單筆輸入
             self._reply_text_with_retry_option(event, 
@@ -274,13 +277,13 @@ class OrderHandler:
                 "contents": [
                     {
                         "type": "button",
-                        "style": "primary",
+                        "style": "secondary",
                         "height": "sm",
                         "action": {
                             "type": "postback",
-                            "label": "確認此訂單",
+                            "label": "✏️ 修改此訂單",
                             "data": json.dumps({
-                                "action": "confirm_order",
+                                "action": "edit_order",
                                 "order_index": order_index
                             })
                         }
@@ -375,8 +378,8 @@ class OrderHandler:
         parsed_data = self.order_sessions[user_id]['data']['parsed']
         self._show_orders_confirmation(event, parsed_data)
     
-    def _confirm_order(self, event: PostbackEvent, order_index: int) -> None:
-        """統一確認訂單方法"""
+    def _edit_order(self, event: PostbackEvent, order_index: int) -> None:
+        """編輯特定訂單"""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -391,23 +394,78 @@ class OrderHandler:
             self._reply_text(event, "訂單索引錯誤。")
             return
         
-        order_data = orders[order_index - 1]
-        self._save_order_to_sheets(event, order_data, order_index)
+        # 儲存要編輯的訂單索引
+        self.order_sessions[user_id]['data']['editing_order_index'] = order_index
+        self.order_sessions[user_id]['status'] = 'editing_order'
         
-        # 檢查是否還有其他訂單需要確認
-        total_orders = len(orders)
-        if order_index < total_orders:
-            # 繼續下一份訂單
-            self._reply_text(event, 
-                f"✅ 訂單 {order_index} 已確認！\n\n"
-                f"還有 {total_orders - order_index} 份訂單待確認。"
-            )
-        else:
-            # 所有訂單都確認完畢
-            self._reply_text(event, "🎉 所有訂單都已確認完成！")
-            if user_id in self.order_sessions:
-                del self.order_sessions[user_id]
+        current_order = orders[order_index - 1]
+        
+        # 顯示當前訂單資訊供編輯
+        order_summary = f"📝 編輯訂單 {order_index}\n\n當前資訊：\n"
+        
+        if current_order.get('sender_name'):
+            order_summary += f"寄件人: {current_order['sender_name']}\n"
+        if current_order.get('sender_phone'):
+            order_summary += f"寄件人電話: {current_order['sender_phone']}\n"
+        
+        order_summary += f"收件人: {current_order.get('receiver_name', 'N/A')}\n"
+        order_summary += f"收件人電話: {current_order.get('receiver_phone', 'N/A')}\n"
+        order_summary += f"地址: {current_order.get('shipping_address', 'N/A')}\n"
+        
+        if current_order.get('items'):
+            order_summary += "商品: "
+            for item in current_order['items']:
+                order_summary += f"{item['name']} x{item['quantity']}, "
+            order_summary = order_summary.rstrip(', ') + "\n"
+        
+        if current_order.get('shipping_date'):
+            order_summary += f"發貨日期: {current_order['shipping_date']}\n"
+        
+        order_summary += "\n💡 請輸入完整的訂單資訊來更新此訂單："
+        
+        self._reply_text(event, order_summary)
     
+    def _process_order_edit(self, event: MessageEvent) -> None:
+        """處理訂單編輯"""
+        user_id = event.source.user_id
+        edit_text = event.message.text
+        
+        if (user_id not in self.order_sessions or 
+            'editing_order_index' not in self.order_sessions[user_id].get('data', {})):
+            self._reply_text(event, "編輯狀態異常，請重新開始。")
+            return
+        
+        editing_index = self.order_sessions[user_id]['data']['editing_order_index']
+        
+        # 使用 DSPy 解析編輯後的訂單文字
+        if self.order_client:
+            result = self.order_client.parse_order(edit_text)
+            
+            if result['success']:
+                parsed_data = result['data']
+                orders = parsed_data.get('orders', [])
+                
+                if orders and len(orders) > 0:
+                    # 使用解析後的第一個訂單來更新
+                    new_order = orders[0]
+                    
+                    # 更新原始訂單陣列中的特定訂單
+                    original_orders = self.order_sessions[user_id]['data']['parsed']['orders']
+                    original_orders[editing_index - 1] = new_order
+                    
+                    # 重設狀態為確認狀態
+                    self.order_sessions[user_id]['status'] = 'confirming'
+                    del self.order_sessions[user_id]['data']['editing_order_index']
+                    
+                    # 顯示更新後的訂單確認介面
+                    self._show_orders_confirmation(event, self.order_sessions[user_id]['data']['parsed'])
+                else:
+                    self._reply_text(event, "❌ 編輯失敗，無法解析訂單資訊。請重新輸入完整的訂單資訊。")
+            else:
+                error_message = result.get('error', '未知錯誤')
+                self._reply_text(event, f"❌ 編輯失敗：{error_message}\n\n請重新輸入完整的訂單資訊。")
+        else:
+            self._reply_text(event, "❌ 編輯功能目前不可用，請聯絡管理員。")
     
     def _format_single_order_summary(self, order_data: Dict[str, Any]) -> str:
         """格式化單一訂單摘要"""
@@ -573,27 +631,26 @@ class OrderHandler:
             self._reply_text(event, "沒有找到有效的訂單資料。")
             return
         
-        success_count = 0
-        failed_orders = []
-        order_ids = []
-        
-        # 批量處理所有訂單
+        # 為所有訂單生成編號
         for i, order_data in enumerate(orders, 1):
-            # 產生訂單編號
             order_id = f"ORD-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
             order_data['order_id'] = order_id
+        
+        if self.sheets_client:
+            # 使用批量寫入功能
+            result = self.sheets_client.append_multiple_orders(orders)
+            success_count = result.get('total_processed', 0)
+            order_ids = result.get('order_ids', [])
             
-            if self.sheets_client:
-                result = self.sheets_client.append_order(order_data)
-                if result['success']:
-                    success_count += 1
-                    order_ids.append(order_id)
-                else:
-                    failed_orders.append(f"訂單 {i}")
+            if not result['success']:
+                failed_orders = [f"訂單 {i}" for i in range(1, len(orders) + 1)]
             else:
-                # 沒有設定 Google Sheets，視為成功
-                success_count += 1
-                order_ids.append(order_id)
+                failed_orders = []
+        else:
+            # 沒有設定 Google Sheets，視為全部成功
+            success_count = len(orders)
+            order_ids = [order['order_id'] for order in orders]
+            failed_orders = []
         
         total_orders = len(orders)
         
