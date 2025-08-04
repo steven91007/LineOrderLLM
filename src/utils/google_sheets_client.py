@@ -32,6 +32,21 @@ class GoogleSheetsClient:
             print(f"Error building Google Sheets service: {e}")
             return None
     
+    def _get_sheet_title(self) -> str:
+        """獲取第一個工作表的名稱"""
+        try:
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=self.sheet_id
+            ).execute()
+            
+            sheets = spreadsheet.get('sheets', [])
+            if sheets:
+                return sheets[0].get('properties', {}).get('title', 'Sheet1')
+            else:
+                return 'Sheet1'
+        except Exception:
+            return 'Sheet1'
+    
     def append_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """將訂單資料添加到試算表（支援單一訂單和多訂單）"""
         if not self.service:
@@ -57,7 +72,8 @@ class GoogleSheetsClient:
             ]]
             
             # 指定寫入範圍（A:K 表示從 A 欄到 K 欄）
-            range_name = 'Sheet1!A:K'
+            sheet_title = self._get_sheet_title()
+            range_name = f'{sheet_title}!A:K'
             
             # 執行寫入操作
             body = {
@@ -142,7 +158,8 @@ class GoogleSheetsClient:
                 order_ids.append(order_data.get('order_id', ''))
             
             # 指定寫入範圍（A:K 表示從 A 欄到 K 欄）
-            range_name = 'Sheet1!A:K'
+            sheet_title = self._get_sheet_title()
+            range_name = f'{sheet_title}!A:K'
             
             # 執行批量寫入操作
             body = {
@@ -186,8 +203,19 @@ class GoogleSheetsClient:
             return False
         
         try:
+            # 先獲取工作表資訊
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=self.sheet_id
+            ).execute()
+            
+            sheets = spreadsheet.get('sheets', [])
+            if sheets:
+                sheet_title = sheets[0].get('properties', {}).get('title', 'Sheet1')
+            else:
+                sheet_title = 'Sheet1'
+            
             # 檢查第一行是否有標題
-            range_name = 'Sheet1!A1:K1'
+            range_name = f'{sheet_title}!A1:K1'
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
                 range=range_name
@@ -218,7 +246,7 @@ class GoogleSheetsClient:
                 
                 self.service.spreadsheets().values().update(
                     spreadsheetId=self.sheet_id,
-                    range='Sheet1!A1:K1',
+                    range=f'{sheet_title}!A1:K1',
                     valueInputOption='USER_ENTERED',
                     body=body
                 ).execute()
@@ -270,7 +298,8 @@ class GoogleSheetsClient:
         
         try:
             # 獲取所有資料
-            range_name = 'Sheet1!A:K'
+            sheet_title = self._get_sheet_title()
+            range_name = f'{sheet_title}!A:K'
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
                 range=range_name
@@ -339,7 +368,10 @@ class GoogleSheetsClient:
             sheet_count = len(spreadsheet.get('sheets', []))
             
             # 嘗試讀取第一行以確認讀取權限
-            range_name = 'Sheet1!A1:A1'
+            # 使用helper方法獲取工作表名稱
+            sheet_title = self._get_sheet_title()
+            range_name = f'{sheet_title}!A1:A1'
+            
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
                 range=range_name
