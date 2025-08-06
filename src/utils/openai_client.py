@@ -2,12 +2,14 @@ import openai
 from typing import Dict, Any, Optional, List
 import json
 import re
+from .taiwan_address import TaiwanAddressNormalizer
 
 
 class OpenAIClient:
     def __init__(self, api_key: str, model: str = "gpt-4-0125-preview"):
         self.client = openai.OpenAI(api_key=api_key)
         self.model = model
+        self.address_normalizer = TaiwanAddressNormalizer()
     
     def parse_order(self, order_text: str) -> Dict[str, Any]:
         """使用 OpenAI 解析訂單文字（支援多訂單）"""
@@ -36,6 +38,7 @@ class OpenAIClient:
                     'suggestion': 'single_order'
                 }
             
+            result = self._normalize_addresses_in_result(result)
             return {
                 'success': True,
                 'data': result,
@@ -236,6 +239,24 @@ class OpenAIClient:
         
         return False
     
+    def _normalize_addresses_in_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """標準化解析結果中的地址"""
+        order_type = result.get('order_type', 'single')
+        
+        if order_type == 'single':
+            # 處理單一訂單的地址
+            if 'shipping_address' in result and result['shipping_address']:
+                result['shipping_address'] = self.address_normalizer.normalize_address(result['shipping_address'])
+                
+        elif order_type == 'multiple':
+            # 處理多訂單的地址
+            orders = result.get('orders', [])
+            for order in orders:
+                if 'shipping_address' in order and order['shipping_address']:
+                    order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
+        
+        return result
+    
     def _validate_multi_order_format(self, result: Dict[str, Any]) -> bool:
         """驗證多訂單格式"""
         order_type = result.get('order_type')
@@ -258,3 +279,21 @@ class OpenAIClient:
             return True
         
         return False
+    
+    def _normalize_addresses_in_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """標準化解析結果中的地址"""
+        order_type = result.get('order_type', 'single')
+        
+        if order_type == 'single':
+            # 處理單一訂單的地址
+            if 'shipping_address' in result and result['shipping_address']:
+                result['shipping_address'] = self.address_normalizer.normalize_address(result['shipping_address'])
+                
+        elif order_type == 'multiple':
+            # 處理多訂單的地址
+            orders = result.get('orders', [])
+            for order in orders:
+                if 'shipping_address' in order and order['shipping_address']:
+                    order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
+        
+        return result
