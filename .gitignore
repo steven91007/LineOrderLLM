@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+
+# MLflow
+mlruns/
+
+# Environment and credentials
+.env
+*.json
+credentials.json
+aesthetic-rush-323802-7f5591bc4a1c.json
+
+# IDE files
+.idea/
