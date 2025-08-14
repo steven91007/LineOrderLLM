@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單編輯器</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <!-- 移除 LIFF SDK，改用純網頁方案 -->
+    <style>
+        .order-card {
+            transition: all 0.3s ease;
+        }
+        .order-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .field-input {
+            transition: border-color 0.3s ease;
+        }
+        .field-input:focus {
+            border-color: #10B981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        .save-button {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+        }
+        .cancel-button {
+            background: linear-gradient(135deg, #6B7280 0%, #4B5563 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+    <div class="container mx-auto px-4 py-6 max-w-4xl">
+        <!-- 標題區 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h1 class="text-2xl font-bold text-gray-800 text-center">📝 訂單編輯器</h1>
+            <p class="text-gray-600 text-center mt-2">簡化版 - 無需 LINE 登入</p>
+            <div class="text-center mt-4">
+                <span class="inline-block bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
+                    會話 ID: <span id="current-session">載入中...</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- 載入狀態 -->
+        <div id="loading-state" class="text-center py-8">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
+            <p class="mt-4 text-gray-600">載入訂單資料中...</p>
+        </div>
+
+        <!-- 錯誤狀態 -->
+        <div id="error-state" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            <strong class="font-bold">載入失敗！</strong>
+            <span class="block sm:inline" id="error-message"></span>
+            <div class="mt-2">
+                <button onclick="location.reload()" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+                    重新載入
+                </button>
+                <button onclick="goHome()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 ml-2">
+                    回到首頁
+                </button>
+            </div>
+        </div>
+
+        <!-- 訂單列表 -->
+        <div id="orders-container" class="hidden">
+            <!-- 動態載入訂單卡片 -->
+        </div>
+
+        <!-- 操作按鈕 -->
+        <div id="action-buttons" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4">
+            <div class="max-w-4xl mx-auto flex gap-3">
+                <button id="save-btn" class="save-button text-white px-6 py-3 rounded-lg font-semibold flex-1 hover:shadow-lg transition-all duration-300">
+                    💾 儲存所有變更
+                </button>
+                <button id="cancel-btn" class="cancel-button text-white px-6 py-3 rounded-lg font-semibold w-24 hover:shadow-lg transition-all duration-300">
+                    取消
+                </button>
+            </div>
+        </div>
+
+        <!-- 載入中遮罩 -->
+        <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-6 rounded-lg">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
+                <p class="mt-3 text-gray-700">處理中...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ordersData = [];
+        let userId = 'web_user';
+        let sessionId = '';
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('頁面載入完成，開始初始化...');
+            loadOrderData();
+        });
+
+        // 載入訂單資料
+        function loadOrderData() {
+            console.log('開始載入訂單資料...');
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            sessionId = urlParams.get('session');
+            
+            console.log('Current URL:', window.location.href);
+            console.log('Session ID from URL:', sessionId);
+            
+            document.getElementById('current-session').textContent = sessionId || '未提供';
+            
+            if (!sessionId) {
+                showError('缺少會話 ID 參數', 
+                    '請確保從正確的連結進入編輯器。\\n\\nURL: ' + window.location.href);
+                return;
+            }
+
+            // 從後端 API 獲取訂單資料
+            fetch(`/api/liff/orders/${sessionId}`)
+                .then(response => {
+                    console.log('API Response status:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('API Response data:', data);
+                    
+                    if (data.success) {
+                        ordersData = data.orders;
+                        userId = data.user_id;
+                        
+                        document.getElementById('loading-state').classList.add('hidden');
+                        document.getElementById('orders-container').classList.remove('hidden');
+                        document.getElementById('action-buttons').classList.remove('hidden');
+                        
+                        renderOrders();
+                        
+                        console.log('訂單載入成功:', ordersData);
+                    } else {
+                        showError('載入訂單失敗', data.error || '未知錯誤');
+                    }
+                })
+                .catch(error => {
+                    console.error('載入訂單失敗:', error);
+                    showError('網路錯誤', '無法連接到伺服器，請檢查網路連接。');
+                });
+        }
+
+        // 顯示錯誤
+        function showError(title, message) {
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('error-state').classList.remove('hidden');
+            document.getElementById('error-message').textContent = message;
+        }
+
+        // 回到首頁
+        function goHome() {
+            window.location.href = '/';
+        }
+
+        // 渲染訂單卡片
+        function renderOrders() {
+            const container = document.getElementById('orders-container');
+            container.innerHTML = '';
+
+            ordersData.forEach((order, index) => {
+                const orderCard = createOrderCard(order, index);
+                container.appendChild(orderCard);
+            });
+        }
+
+        // 建立訂單卡片
+        function createOrderCard(order, index) {
+            const card = document.createElement('div');
+            card.className = 'order-card bg-white rounded-lg shadow-md p-6 mb-4';
+            
+            card.innerHTML = `
+                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+                    📦 訂單 ${index + 1}
+                </h3>
+                
+                <!-- 收件人資訊 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">👤 收件人資訊</label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="收件人姓名"
+                               value="${order.receiver_name || ''}"
+                               onchange="updateOrder(${index}, 'receiver_name', this.value)">
+                        <input type="tel" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="收件人電話"
+                               value="${order.receiver_phone || ''}"
+                               onchange="updateOrder(${index}, 'receiver_phone', this.value)">
+                    </div>
+                </div>
+
+                <!-- 地址 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📍 收件地址</label>
+                    <textarea class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                              rows="2"
+                              placeholder="請輸入完整地址"
+                              onchange="updateOrder(${index}, 'shipping_address', this.value)">${order.shipping_address || ''}</textarea>
+                </div>
+
+                <!-- 商品項目 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📦 商品項目</label>
+                    <div id="items-container-${index}">
+                        ${renderItemsForOrder(order.items || [], index)}
+                    </div>
+                    <button type="button" 
+                            class="mt-2 text-green-600 hover:text-green-800 text-sm font-medium"
+                            onclick="addNewItem(${index})">
+                        ➕ 新增商品
+                    </button>
+                </div>
+
+                <!-- 發貨日期 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📅 發貨日期</label>
+                    <input type="text" 
+                           class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="MM-DD (如：08-15)"
+                           value="${order.shipping_date || ''}"
+                           pattern="\\\\d{2}-\\\\d{2}"
+                           onchange="updateOrder(${index}, 'shipping_date', this.value)">
+                    <p class="text-xs text-gray-500 mt-1">格式：月-日 (如：08-15)，留空表示當日發貨</p>
+                </div>
+
+                <!-- 寄件人資訊（選填）-->
+                <details class="mb-4">
+                    <summary class="text-sm font-medium text-gray-700 cursor-pointer hover:text-green-600">
+                        🏢 寄件人資訊 (選填)
+                    </summary>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="寄件人姓名"
+                               value="${order.sender_name || ''}"
+                               onchange="updateOrder(${index}, 'sender_name', this.value)">
+                        <input type="tel" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="寄件人電話"
+                               value="${order.sender_phone || ''}"
+                               onchange="updateOrder(${index}, 'sender_phone', this.value)">
+                    </div>
+                </details>
+            `;
+            
+            return card;
+        }
+
+        // 渲染商品項目
+        function renderItemsForOrder(items, orderIndex) {
+            return items.map((item, itemIndex) => `
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="text" 
+                           class="field-input flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="商品名稱"
+                           value="${item.name || ''}"
+                           onchange="updateOrderItem(${orderIndex}, ${itemIndex}, 'name', this.value)">
+                    <input type="number" 
+                           class="field-input w-20 px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="數量"
+                           min="1"
+                           value="${item.quantity || 1}"
+                           onchange="updateOrderItem(${orderIndex}, ${itemIndex}, 'quantity', parseInt(this.value))">
+                    <button type="button" 
+                            class="text-red-500 hover:text-red-700 px-2"
+                            onclick="removeItem(${orderIndex}, ${itemIndex})">
+                        🗑️
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        // 更新訂單資料
+        function updateOrder(orderIndex, field, value) {
+            ordersData[orderIndex][field] = value;
+            console.log(`Updated order ${orderIndex}.${field} =`, value);
+        }
+
+        // 更新商品項目
+        function updateOrderItem(orderIndex, itemIndex, field, value) {
+            if (!ordersData[orderIndex].items) {
+                ordersData[orderIndex].items = [];
+            }
+            ordersData[orderIndex].items[itemIndex][field] = value;
+            console.log(`Updated order ${orderIndex}.items[${itemIndex}].${field} =`, value);
+        }
+
+        // 新增商品項目
+        function addNewItem(orderIndex) {
+            if (!ordersData[orderIndex].items) {
+                ordersData[orderIndex].items = [];
+            }
+            ordersData[orderIndex].items.push({ name: '', quantity: 1 });
+            
+            // 重新渲染該訂單的商品列表
+            const container = document.getElementById(`items-container-${orderIndex}`);
+            container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
+        }
+
+        // 移除商品項目
+        function removeItem(orderIndex, itemIndex) {
+            ordersData[orderIndex].items.splice(itemIndex, 1);
+            
+            // 重新渲染該訂單的商品列表
+            const container = document.getElementById(`items-container-${orderIndex}`);
+            container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
+        }
+
+        // 儲存變更
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('save-btn').addEventListener('click', function() {
+                console.log('開始儲存變更...');
+                
+                // 驗證資料
+                for (let i = 0; i < ordersData.length; i++) {
+                    const order = ordersData[i];
+                    if (!order.receiver_name || !order.receiver_phone || !order.shipping_address) {
+                        alert(`訂單 ${i + 1} 缺少必填資訊：收件人姓名、電話或地址`);
+                        return;
+                    }
+                    if (!order.items || order.items.length === 0) {
+                        alert(`訂單 ${i + 1} 至少需要一個商品項目`);
+                        return;
+                    }
+                }
+
+                // 顯示載入中
+                document.getElementById('loading-overlay').classList.remove('hidden');
+
+                // 發送更新請求
+                fetch(`/api/liff/orders/${sessionId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        orders: ordersData
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                    
+                    console.log('Save result:', data);
+                    
+                    if (data.success) {
+                        alert(`✅ 訂單更新成功！\\n\\n共更新了 ${ordersData.length} 筆訂單\\n系統已自動處理並寫入 Google Sheets`);
+                        
+                        // 簡化版：直接關閉視窗或跳轉
+                        if (confirm('是否返回首頁？')) {
+                            window.location.href = '/';
+                        }
+                    } else {
+                        alert('儲存失敗：' + data.error);
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                    console.error('儲存失敗:', error);
+                    alert('網路錯誤，請重試');
+                });
+            });
+
+            // 取消按鈕
+            document.getElementById('cancel-btn').addEventListener('click', function() {
+                if (confirm('確定要取消編輯嗎？所有變更將不會儲存。')) {
+                    window.location.href = '/';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
