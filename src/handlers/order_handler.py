@@ -12,20 +12,26 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
 import json
+import logging
 from typing import Dict, Any, List
 import uuid
 from datetime import datetime
 from ..utils.openai_client import OpenAIClient
 from ..utils.dspy_client import DSPyOrderClient
 from ..utils.google_sheets_client import GoogleSheetsClient
+from .liff_handler import LIFFHandler
+
+logger = logging.getLogger(__name__)
 
 
 class OrderHandler:
-    def __init__(self, configuration, authorized_users, client_type='dspy', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None):
+    def __init__(self, configuration, authorized_users, client_type='dspy', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None, liff_id=None, base_url=None):
         self.configuration = configuration
         self.authorized_users = authorized_users
         self.order_sessions = {}  # 存儲用戶的訂單處理狀態
         self.client_type = client_type
+        self.liff_id = liff_id or '2007889032-OolKDrp3'  # LIFF 應用程式 ID
+        self.base_url = base_url  # 伺服器基礎 URL
         
         # 初始化訂單解析客戶端
         if client_type == 'dspy' and openai_api_key:
@@ -35,12 +41,22 @@ class OrderHandler:
         else:
             self.order_client = None
         
-        # Google Sheets 客戶端
-        self.sheets_client = GoogleSheetsClient(google_credentials_path, google_sheet_id) if google_sheet_id and google_credentials_path else None
+        # Google Sheets 客戶端（啟用按日期自動分組）
+        self.sheets_client = GoogleSheetsClient(
+            google_credentials_path, 
+            google_sheet_id, 
+            auto_organize_by_date=True
+        ) if google_sheet_id and google_credentials_path else None
         
         # 初始化 Google Sheets（建立標題）
         if self.sheets_client:
             self.sheets_client.create_sheet_if_not_exists()
+        
+        # 初始化 LIFF 處理器
+        self.liff_handler = LIFFHandler(
+            order_handler=self,
+            google_sheets_client=self.sheets_client
+        )
     
     def is_authorized(self, user_id: str) -> bool:
         """檢查用戶是否有權限使用訂單功能"""
@@ -62,9 +78,6 @@ class OrderHandler:
         elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'waiting_order_text':
             # 用戶正在輸入訂單內容
             self._process_order_text(event)
-        elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'editing_order':
-            # 用戶正在編輯訂單
-            self._process_order_edit(event)
     
     def handle_postback(self, event: PostbackEvent) -> None:
         """處理按鈕回應"""
@@ -95,10 +108,13 @@ class OrderHandler:
         elif action == 'confirm_all_orders_batch':
             # 批量確認所有訂單（新版）
             self._confirm_all_orders_batch(event)
-        elif action == 'edit_order':
-            # 編輯訂單
+        elif action == 'edit_order_liff':
+            # 使用 LIFF 編輯特定訂單
             order_index = data.get('order_index', 1)
-            self._edit_order(event, order_index)
+            self._edit_order_with_liff(event, order_index)
+        elif action == 'open_liff_editor':
+            # 開啟 LIFF 編輯器（編輯全部訂單）
+            self._open_liff_editor(event)
         elif action == 'retry_single_order':
             # 建議單筆輸入
             self._reply_text_with_retry_option(event, 
@@ -191,6 +207,7 @@ class OrderHandler:
         """顯示訂單確認介面（使用 Flex Message 輪播）"""
         orders = parsed_data.get('orders', [])
         total_orders = len(orders)
+        user_id = event.source.user_id
         
         if total_orders == 0:
             self._reply_text(event, "沒有找到有效的訂單資料。")
@@ -203,7 +220,7 @@ class OrderHandler:
             flex_bubbles.append(bubble)
         
         # 添加最後一頁：確認全部訂單
-        confirm_all_bubble = self._create_confirm_all_bubble(total_orders)
+        confirm_all_bubble = self._create_confirm_all_bubble(total_orders, user_id)
         flex_bubbles.append(confirm_all_bubble)
         
         # 構建 Flex Carousel
@@ -279,11 +296,12 @@ class OrderHandler:
                         "type": "button",
                         "style": "secondary",
                         "height": "sm",
+                        "color": "#2563EB",
                         "action": {
                             "type": "postback",
-                            "label": "✏️ 修改此訂單",
+                            "label": "✏️ 編輯此訂單",
                             "data": json.dumps({
-                                "action": "edit_order",
+                                "action": "edit_order_liff",
                                 "order_index": order_index
                             })
                         }
@@ -301,8 +319,57 @@ class OrderHandler:
         
         return bubble
     
-    def _create_confirm_all_bubble(self, total_orders: int) -> Dict[str, Any]:
+    def _create_confirm_all_bubble(self, total_orders: int, user_id: str = None) -> Dict[str, Any]:
         """創建確認全部訂單的 Flex Bubble"""
+        
+        # 基礎按鈕
+        buttons = [
+            {
+                "type": "button",
+                "style": "primary",
+                "height": "sm",
+                "color": "#1DB446",
+                "action": {
+                    "type": "postback",
+                    "label": "✅ 確認全部訂單",
+                    "data": json.dumps({
+                        "action": "confirm_all_orders_batch"
+                    })
+                }
+            }
+        ]
+        
+        # 如果有 LIFF ID，添加 LIFF 編輯按鈕
+        if self.liff_id and user_id:
+            buttons.insert(0, {
+                "type": "button",
+                "style": "secondary",
+                "height": "sm",
+                "color": "#2563EB",
+                "action": {
+                    "type": "postback",
+                    "label": "🌐 網頁編輯",
+                    "data": json.dumps({
+                        "action": "open_liff_editor",
+                        "user_id": user_id
+                    })
+                }
+            })
+        
+        # 添加重新檢查按鈕
+        buttons.append({
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            "action": {
+                "type": "postback",
+                "label": "🔄 重新檢查",
+                "data": json.dumps({
+                    "action": "start_order"
+                })
+            }
+        })
+        
         bubble = {
             "type": "bubble",
             "header": {
@@ -324,7 +391,7 @@ class OrderHandler:
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"📋 共 {total_orders} 份訂單\n\n請確認前面所有訂單資訊無誤後，點擊下方按鈕一次性提交全部訂單到系統。\n\n⚠️ 提交後將無法修改，請仔細核對。",
+                        "text": f"📋 共 {total_orders} 份訂單\n\n📱 快速確認：點擊「確認全部訂單」直接提交\n🌐 詳細編輯：點擊「網頁編輯」開啟編輯器\n\n⚠️ 提交後將寫入系統，請仔細核對。",
                         "wrap": True,
                         "size": "sm"
                     }
@@ -334,33 +401,7 @@ class OrderHandler:
                 "type": "box",
                 "layout": "vertical",
                 "spacing": "sm",
-                "contents": [
-                    {
-                        "type": "button",
-                        "style": "primary",
-                        "height": "sm",
-                        "color": "#1DB446",
-                        "action": {
-                            "type": "postback",
-                            "label": "確認全部訂單無誤",
-                            "data": json.dumps({
-                                "action": "confirm_all_orders_batch"
-                            })
-                        }
-                    },
-                    {
-                        "type": "button",
-                        "style": "secondary",
-                        "height": "sm",
-                        "action": {
-                            "type": "postback",
-                            "label": "重新檢查",
-                            "data": json.dumps({
-                                "action": "start_order"
-                            })
-                        }
-                    }
-                ]
+                "contents": buttons
             }
         }
         
@@ -378,8 +419,8 @@ class OrderHandler:
         parsed_data = self.order_sessions[user_id]['data']['parsed']
         self._show_orders_confirmation(event, parsed_data)
     
-    def _edit_order(self, event: PostbackEvent, order_index: int) -> None:
-        """編輯特定訂單"""
+    def _edit_order_with_liff(self, event: PostbackEvent, order_index: int) -> None:
+        """使用 LIFF 編輯特定訂單"""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -394,78 +435,184 @@ class OrderHandler:
             self._reply_text(event, "訂單索引錯誤。")
             return
         
-        # 儲存要編輯的訂單索引
-        self.order_sessions[user_id]['data']['editing_order_index'] = order_index
-        self.order_sessions[user_id]['status'] = 'editing_order'
-        
-        current_order = orders[order_index - 1]
-        
-        # 顯示當前訂單資訊供編輯
-        order_summary = f"📝 編輯訂單 {order_index}\n\n當前資訊：\n"
-        
-        if current_order.get('sender_name'):
-            order_summary += f"寄件人: {current_order['sender_name']}\n"
-        if current_order.get('sender_phone'):
-            order_summary += f"寄件人電話: {current_order['sender_phone']}\n"
-        
-        order_summary += f"收件人: {current_order.get('receiver_name', 'N/A')}\n"
-        order_summary += f"收件人電話: {current_order.get('receiver_phone', 'N/A')}\n"
-        order_summary += f"地址: {current_order.get('shipping_address', 'N/A')}\n"
-        
-        if current_order.get('items'):
-            order_summary += "商品: "
-            for item in current_order['items']:
-                order_summary += f"{item['name']} x{item['quantity']}, "
-            order_summary = order_summary.rstrip(', ') + "\n"
-        
-        if current_order.get('shipping_date'):
-            order_summary += f"發貨日期: {current_order['shipping_date']}\n"
-        
-        order_summary += "\n💡 請輸入完整的訂單資訊來更新此訂單："
-        
-        self._reply_text(event, order_summary)
-    
-    def _process_order_edit(self, event: MessageEvent) -> None:
-        """處理訂單編輯"""
-        user_id = event.source.user_id
-        edit_text = event.message.text
-        
-        if (user_id not in self.order_sessions or 
-            'editing_order_index' not in self.order_sessions[user_id].get('data', {})):
-            self._reply_text(event, "編輯狀態異常，請重新開始。")
+        if not self.liff_id:
+            # LIFF 未設定，顯示友好的錯誤訊息
+            self._reply_text(event, 
+                "🌐 網頁編輯功能需要管理員設定 LIFF 應用程式。\n\n"
+                f"目前訂單 {order_index} 的資訊：\n"
+                f"收件人：{orders[order_index-1].get('receiver_name', 'N/A')}\n"
+                f"電話：{orders[order_index-1].get('receiver_phone', 'N/A')}\n"
+                f"地址：{orders[order_index-1].get('shipping_address', 'N/A')}\n\n"
+                "請聯絡管理員啟用網頁編輯功能，或使用「確認全部訂單」直接提交。"
+            )
             return
         
-        editing_index = self.order_sessions[user_id]['data']['editing_order_index']
-        
-        # 使用 DSPy 解析編輯後的訂單文字
-        if self.order_client:
-            result = self.order_client.parse_order(edit_text)
+        try:
+            # 建立 LIFF 會話（包含所有訂單）
+            session_id = self.liff_handler.create_liff_session(user_id, parsed_data)
             
-            if result['success']:
-                parsed_data = result['data']
-                orders = parsed_data.get('orders', [])
+            # 建立 LIFF URL
+            liff_url = self.liff_handler.get_liff_url(f"{session_id}&focus={order_index}", self.liff_id, self.base_url)
+            
+            # 發送 LIFF 訊息
+            with ApiClient(self.configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
                 
-                if orders and len(orders) > 0:
-                    # 使用解析後的第一個訂單來更新
-                    new_order = orders[0]
-                    
-                    # 更新原始訂單陣列中的特定訂單
-                    original_orders = self.order_sessions[user_id]['data']['parsed']['orders']
-                    original_orders[editing_index - 1] = new_order
-                    
-                    # 重設狀態為確認狀態
-                    self.order_sessions[user_id]['status'] = 'confirming'
-                    del self.order_sessions[user_id]['data']['editing_order_index']
-                    
-                    # 顯示更新後的訂單確認介面
-                    self._show_orders_confirmation(event, self.order_sessions[user_id]['data']['parsed'])
-                else:
-                    self._reply_text(event, "❌ 編輯失敗，無法解析訂單資訊。請重新輸入完整的訂單資訊。")
-            else:
-                error_message = result.get('error', '未知錯誤')
-                self._reply_text(event, f"❌ 編輯失敗：{error_message}\n\n請重新輸入完整的訂單資訊。")
-        else:
-            self._reply_text(event, "❌ 編輯功能目前不可用，請聯絡管理員。")
+                current_order = orders[order_index - 1]
+                flex_message_content = {
+                    "type": "bubble",
+                    "header": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"✏️ 編輯訂單 {order_index}",
+                                "weight": "bold",
+                                "size": "lg",
+                                "color": "#2563EB"
+                            }
+                        ]
+                    },
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"📝 即將編輯：\n收件人：{current_order.get('receiver_name', 'N/A')}\n地址：{current_order.get('shipping_address', 'N/A')}\n\n🌐 將開啟網頁編輯器，您可以：\n• 編輯此訂單的所有資訊\n• 同時修改其他訂單\n• 一次儲存所有變更\n\n點擊下方按鈕開始：",
+                                "wrap": True,
+                                "size": "sm"
+                            }
+                        ]
+                    },
+                    "footer": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "button",
+                                "style": "primary",
+                                "color": "#2563EB",
+                                "action": {
+                                    "type": "uri",
+                                    "label": "🌐 開啟編輯器",
+                                    "uri": liff_url
+                                }
+                            }
+                        ]
+                    }
+                }
+                
+                flex_message = FlexMessage(
+                    alt_text=f"編輯訂單 {order_index}",
+                    contents=FlexContainer.from_dict(flex_message_content)
+                )
+                
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[flex_message]
+                    )
+                )
+                
+                logger.info(f"LIFF editor opened for user {user_id}, focusing on order {order_index}")
+                
+        except Exception as e:
+            logger.error(f"Error opening LIFF editor for order {order_index}: {e}")
+            self._reply_text(event, f"❌ 開啟編輯器失敗，請稍後重試。\n\n錯誤：{str(e)}")
+    
+    
+    
+    
+    def _open_liff_editor(self, event: PostbackEvent) -> None:
+        """開啟 LIFF 編輯器"""
+        user_id = event.source.user_id
+        
+        if (user_id not in self.order_sessions or 
+            'parsed' not in self.order_sessions[user_id].get('data', {})):
+            self._reply_text(event, "找不到訂單資料，請重新開始。")
+            return
+        
+        if not self.liff_id:
+            self._reply_text(event, "LIFF 編輯器尚未設定，請使用按鈕編輯功能。")
+            return
+        
+        try:
+            # 建立 LIFF 會話
+            parsed_data = self.order_sessions[user_id]['data']['parsed']
+            session_id = self.liff_handler.create_liff_session(user_id, parsed_data)
+            
+            # 建立 LIFF URL
+            liff_url = self.liff_handler.get_liff_url(session_id, self.liff_id, self.base_url)
+            
+            # 發送 LIFF 訊息
+            with ApiClient(self.configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                
+                # 使用 URI Action 開啟 LIFF
+                flex_message_content = {
+                    "type": "bubble",
+                    "header": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "🌐 訂單網頁編輯器",
+                                "weight": "bold",
+                                "size": "lg",
+                                "color": "#2563EB"
+                            }
+                        ]
+                    },
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"📝 將開啟網頁編輯器\n📊 共 {parsed_data.get('total_orders', 0)} 筆訂單\n\n✨ 功能特色：\n• 表格式編輯介面\n• 即時內容驗證\n• 批量修改支援\n• 一鍵儲存更新\n\n點擊下方按鈕開始編輯：",
+                                "wrap": True,
+                                "size": "sm"
+                            }
+                        ]
+                    },
+                    "footer": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "button",
+                                "style": "primary",
+                                "color": "#2563EB",
+                                "action": {
+                                    "type": "uri",
+                                    "label": "🌐 開啟編輯器",
+                                    "uri": liff_url
+                                }
+                            }
+                        ]
+                    }
+                }
+                
+                flex_message = FlexMessage(
+                    alt_text="訂單網頁編輯器",
+                    contents=FlexContainer.from_dict(flex_message_content)
+                )
+                
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[flex_message]
+                    )
+                )
+                
+                logger.info(f"LIFF editor opened for user {user_id}, session {session_id}")
+                
+        except Exception as e:
+            logger.error(f"Error opening LIFF editor: {e}")
+            self._reply_text(event, "❌ 開啟編輯器失敗，請稍後重試或使用按鈕編輯功能。")
     
     def _format_single_order_summary(self, order_data: Dict[str, Any]) -> str:
         """格式化單一訂單摘要"""
@@ -659,14 +806,42 @@ class OrderHandler:
             success_message = (
                 f"🎉 批量提交成功！\n\n"
                 f"✅ 已成功建立 {total_orders} 份訂單\n\n"
-                f"📋 訂單編號：\n"
             )
             
-            for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
-                receiver_name = order.get('receiver_name', 'N/A')
-                success_message += f"• {order_id} ({receiver_name})\n"
+            # 顯示按工作表分組的資訊
+            if hasattr(result, 'get') and result.get('sheet_results'):
+                sheet_results = result.get('sheet_results', {})
+                sheets_used = result.get('sheets_used', [])
+                
+                success_message += f"📊 已自動分組到 {len(sheets_used)} 個工作表：\n\n"
+                
+                for sheet_name in sheets_used:
+                    sheet_info = sheet_results.get(sheet_name, {})
+                    order_count = sheet_info.get('order_count', 0)
+                    
+                    # 解析工作表名稱中的日期和星期
+                    if '_星期' in sheet_name:
+                        date_part, weekday_part = sheet_name.split('_', 1)
+                        try:
+                            date_obj = datetime.strptime(date_part, '%Y%m%d')
+                            formatted_date = date_obj.strftime('%Y-%m-%d')
+                            success_message += f"📅 {formatted_date}({weekday_part}): {order_count} 份訂單\n"
+                        except ValueError:
+                            success_message += f"📋 {sheet_name}: {order_count} 份訂單\n"
+                    else:
+                        success_message += f"📋 {sheet_name}: {order_count} 份訂單\n"
+                
+                success_message += f"\n📋 訂單編號：\n"
+                for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
+                    receiver_name = order.get('receiver_name', 'N/A')
+                    success_message += f"• {order_id} ({receiver_name})\n"
+            else:
+                success_message += f"📋 訂單編號：\n"
+                for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
+                    receiver_name = order.get('receiver_name', 'N/A')
+                    success_message += f"• {order_id} ({receiver_name})\n"
             
-            success_message += f"\n🗂️ 所有訂單已記錄在 Google Sheets 中。"
+            success_message += f"\n🗂️ 所有訂單已自動按出貨日期分組記錄到 Google Sheets。"
             
             self._reply_text(event, success_message)
         else:

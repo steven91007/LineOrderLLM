@@ -14,12 +14,14 @@ from .taiwan_address import TaiwanAddressNormalizer
 
 from .dspy_modules.unified_parser import UnifiedOrderParser
 from .dspy_modules.validators import OrderValidator, JSONValidator
-
+import mlflow
+mlflow.set_experiment("dspy-order-parser")
+mlflow.dspy.autolog()
 
 class DSPyOrderClient:
     """使用 DSPy 的訂單解析客戶端"""
     
-    def __init__(self, api_key: str, model: str = "gpt-4-0125-preview", max_retries: int = 3):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", max_retries: int = 3):
         """
         初始化 DSPy 客戶端
         
