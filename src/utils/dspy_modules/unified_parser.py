@@ -54,8 +54,8 @@ class UnifiedOrderParser(dspy.Module):
             
             # 包含寄件人資訊的範例
             dspy.Example(
-                order_text="寄件人：ABC公司 電話：02-12345678 收件人：陳小姐 電話：0933333333 地址：新北市板橋區文化路300號 商品：18A特製禮盒(客製包裝) x1 發貨日期：2025-01-15",
-                orders_json='[{"sender_name": "ABC公司", "sender_phone": "02-12345678", "receiver_name": "陳小姐", "receiver_phone": "0933333333", "items": [{"name": "18A特製禮盒(客製包裝)", "quantity": 1}], "shipping_date": "2025-01-15", "shipping_address": "新北市板橋區文化路300號"}]'
+                order_text="寄件人：ABC公司 電話：02-12345678 收件人：陳小姐 電話：0933333333 地址：新北市板橋區文化路300號 商品：18A特製禮盒(客製包裝) x1 發貨日期：01-15",
+                orders_json='[{"sender_name": "ABC公司", "sender_phone": "02-12345678", "receiver_name": "陳小姐", "receiver_phone": "0933333333", "items": [{"name": "18A特製禮盒(客製包裝)", "quantity": 1}], "shipping_date": "01-15", "shipping_address": "新北市板橋區文化路300號"}]'
             ).with_inputs("order_text"),
             
             # 沒有產品編號的商品範例
@@ -79,7 +79,7 @@ class UnifiedOrderParser(dspy.Module):
             # 真實案例：類似用戶提供的格式
             dspy.Example(
                 order_text="🩷18A禮盒（8盒） 🌸寄件人：姜正君 收件人: 徐長宏 🌸寄件人電話：0910020932 收件人電話: 091578456 🌸士林福林路377號（溪泊林工地） 送貨日期：9/11號（星期三） 🩷20A禮盒（8盒） 🌸寄件人：徐奇異 🌸收件人電話：0910020932 🌸中壢區文化路123號 送貨日期：9/11號（星期三）",
-                orders_json='[{"sender_name": "姜正君", "sender_phone": "0910020932", "receiver_name": "徐長宏", "receiver_phone": "091578456", "items": [{"name": "18A禮盒", "quantity": 8}], "shipping_date": null, "shipping_address": "士林福林路377號（溪泊林工地）"}, {"sender_name": "徐奇異", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0910020932", "items": [{"name": "20A禮盒", "quantity": 8}], "shipping_date": null, "shipping_address": "中壢區文化路123號"}]'
+                orders_json='[{"sender_name": "姜正君", "sender_phone": "0910020932", "receiver_name": "徐長宏", "receiver_phone": "091578456", "items": [{"name": "18A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "士林福林路377號（溪泊林工地）"}, {"sender_name": "徐奇異", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0910020932", "items": [{"name": "20A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "中壢區文化路123號"}]'
             ).with_inputs("order_text")
         ]
     
@@ -176,7 +176,7 @@ class UnifiedOrderParser(dspy.Module):
    - receiver_name: 收件人姓名（必填）
    - receiver_phone: 收件人電話（必填）
    - items: 商品陣列，格式 [{{"name": "商品名稱", "quantity": 數量}}]
-   - shipping_date: 發貨日期（選填，格式 YYYY-MM-DD 或 null）
+   - shipping_date: 發貨日期（選填，只處理月份和日期，格式 MM-DD 或 null，不包含年份）
    - shipping_address: 收件地址（必填）
 
 3. 商品解析特別規則：
@@ -249,14 +249,37 @@ class UnifiedOrderParser(dspy.Module):
         return cleaned_items
     
     def _clean_date(self, value: Any) -> str:
-        """清理日期格式"""
+        """清理日期格式，只保留月份和日期"""
         if value is None or str(value).strip() == '':
             return None
         
         date_str = str(value).strip()
-        # 簡單的日期格式驗證
+        
+        # 如果是完整的 YYYY-MM-DD 格式，提取月份和日期
         if len(date_str) == 10 and date_str.count('-') == 2:
+            parts = date_str.split('-')
+            if len(parts) == 3:
+                # 返回 MM-DD 格式
+                return f"{parts[1]}-{parts[2]}"
+        
+        # 如果已經是 MM-DD 格式，直接返回
+        if len(date_str) == 5 and date_str.count('-') == 1:
             return date_str
+            
+        # 處理其他可能的格式（如 9/11、01/15 等）
+        import re
+        patterns = [
+            r'(\d{1,2})/(\d{1,2})',  # 9/11 或 01/15
+            r'(\d{1,2})-(\d{1,2})',  # 9-11 或 01-15
+            r'(\d{1,2})\.(\d{1,2})', # 9.11 或 01.15
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, date_str)
+            if match:
+                month = match.group(1).zfill(2)  # 補零到兩位數
+                day = match.group(2).zfill(2)    # 補零到兩位數
+                return f"{month}-{day}"
         
         return None
     

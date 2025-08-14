@@ -41,8 +41,8 @@ SINGLE_ORDER_SCHEMA = {
         },
         "shipping_date": {
             "type": ["string", "null"],
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$|^$",
-            "description": "預計發貨日期（選填，格式：YYYY-MM-DD）"
+            "pattern": "^\\d{2}-\\d{2}$|^$",
+            "description": "預計發貨日期（選填，格式：MM-DD，不含年份）"
         },
         "shipping_address": {
             "type": "string",
@@ -109,8 +109,8 @@ MULTI_ORDER_SCHEMA = {
                     },
                     "shipping_date": {
                         "type": ["string", "null"],
-                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$|^$",
-                        "description": "預計發貨日期（選填）"
+                        "pattern": "^\\d{2}-\\d{2}$|^$",
+                        "description": "預計發貨日期（選填，格式：MM-DD，不含年份）"
                     },
                     "shipping_address": {
                         "type": "string",
