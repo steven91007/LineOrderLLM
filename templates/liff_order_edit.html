@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單編輯 - LIFF</title>
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .order-card {
+            transition: all 0.3s ease;
+        }
+        .order-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .field-input {
+            transition: border-color 0.3s ease;
+        }
+        .field-input:focus {
+            border-color: #10B981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        .save-button {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+        }
+        .cancel-button {
+            background: linear-gradient(135deg, #6B7280 0%, #4B5563 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+    <div class="container mx-auto px-4 py-6 max-w-4xl">
+        <!-- 標題區 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h1 class="text-2xl font-bold text-gray-800 text-center">📝 訂單編輯</h1>
+            <p class="text-gray-600 text-center mt-2">請修改需要調整的訂單資訊</p>
+        </div>
+
+        <!-- 訂單列表 -->
+        <div id="orders-container">
+            <!-- 動態載入訂單卡片 -->
+        </div>
+
+        <!-- 操作按鈕 -->
+        <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4">
+            <div class="max-w-4xl mx-auto flex gap-3">
+                <button id="save-btn" class="save-button text-white px-6 py-3 rounded-lg font-semibold flex-1 hover:shadow-lg transition-all duration-300">
+                    💾 儲存所有變更
+                </button>
+                <button id="cancel-btn" class="cancel-button text-white px-6 py-3 rounded-lg font-semibold w-24 hover:shadow-lg transition-all duration-300">
+                    取消
+                </button>
+            </div>
+        </div>
+
+        <!-- 載入中遮罩 -->
+        <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-6 rounded-lg">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
+                <p class="mt-3 text-gray-700">處理中...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ordersData = [];
+        let userId = '';
+        let sessionId = '';
+
+        // 在初始化前先保存 session 參數（支援多種來源）
+        function preserveSessionId() {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // 優先從 sessionId 參數取得（LIFF URL 攜帶）
+            let sessionId = urlParams.get('sessionId');
+            
+            // 次要從 session 參數取得（相容舊版）
+            if (!sessionId) {
+                sessionId = urlParams.get('session');
+            }
+            
+            if (sessionId) {
+                localStorage.setItem('liff_session_id', sessionId);
+                console.log('Session ID preserved from URL:', sessionId);
+            }
+        }
+
+        // 頁面載入時立即保存 session
+        preserveSessionId();
+
+        // LIFF 初始化
+        liff.init({
+            liffId: '{{LIFF_ID}}' // 需要替換為實際的 LIFF ID
+        }).then(() => {
+            console.log('LIFF 初始化成功');
+            
+            if (liff.isLoggedIn()) {
+                console.log('用戶已登入');
+                liff.getProfile().then(profile => {
+                    userId = profile.userId;
+                    loadOrderData();
+                }).catch(err => {
+                    console.warn('獲取用戶資料失敗，使用默認用戶:', err);
+                    userId = 'default_user';
+                    loadOrderData();
+                });
+            } else {
+                console.log('用戶未登入，準備登入...');
+                
+                // 使用 OAuth2 state 參數攜帶 session ID（推薦做法）
+                const storedSessionId = localStorage.getItem('liff_session_id');
+                const urlParams = new URLSearchParams(window.location.search);
+                const currentSessionId = urlParams.get('sessionId') || urlParams.get('session') || storedSessionId;
+                
+                console.log('Session ID for OAuth state:', currentSessionId);
+                console.log('Clean redirect URI:', window.location.origin + window.location.pathname);
+                
+                liff.login({
+                    redirectUri: window.location.origin + window.location.pathname,  // 乾淨的 URL
+                    state: currentSessionId || ''  // session ID 透過 OAuth state 攜帶
+                });
+            }
+        }).catch(err => {
+            console.error('LIFF 初始化失敗:', err);
+            console.log('可能在非 LINE 環境中運行，嘗試直接載入資料...');
+            // 如果是在瀏覽器中測試（非 LINE 環境），直接載入資料
+            userId = 'test_user';
+            loadOrderData();
+        });
+
+        // 從 URL 參數載入訂單資料
+        function loadOrderData() {
+            const urlParams = new URLSearchParams(window.location.search);
+            sessionId = urlParams.get('session');
+            
+            console.log('Current URL:', window.location.href);
+            console.log('URL Params:', urlParams.toString());
+            console.log('Session ID from URL:', sessionId);
+            
+            // 多重來源取得 session ID（優先順序：URL → OAuth state → localStorage）
+            if (!sessionId) {
+                // 方法1：從 OAuth state 參數取得（登入回調後）
+                const state = urlParams.get('state');
+                if (state) {
+                    sessionId = state;
+                    console.log('Session ID from OAuth state:', sessionId);
+                    // 存儲到 localStorage 以備後用
+                    localStorage.setItem('liff_session_id', sessionId);
+                }
+                
+                // 方法2：從 localStorage 讀取（降級方案）
+                if (!sessionId) {
+                    sessionId = localStorage.getItem('liff_session_id');
+                    console.log('Session ID from localStorage:', sessionId);
+                }
+            } else {
+                // 如果 URL 中有 session，存儲到 localStorage 以備後用
+                localStorage.setItem('liff_session_id', sessionId);
+                console.log('Saved session ID to localStorage:', sessionId);
+            }
+            
+            if (!sessionId) {
+                console.error('Session ID not found in URL parameters');
+                
+                // 嘗試從 LIFF 上下文獲取參數
+                if (typeof liff !== 'undefined' && liff.isInClient()) {
+                    try {
+                        const context = liff.getContext();
+                        console.log('LIFF Context:', context);
+                        
+                        // 檢查是否有其他方式獲取 session
+                        const hash = window.location.hash;
+                        console.log('URL Hash:', hash);
+                        
+                        if (hash.includes('session=')) {
+                            const hashParams = new URLSearchParams(hash.substring(1));
+                            sessionId = hashParams.get('session');
+                            console.log('Session from hash:', sessionId);
+                        }
+                    } catch (e) {
+                        console.error('Error getting LIFF context:', e);
+                    }
+                }
+                
+                if (!sessionId) {
+                    // 最後嘗試：檢查是否是 OAuth 回調，詢問用戶重新開始
+                    if (urlParams.has('code') && urlParams.has('liffClientId')) {
+                        if (confirm('登入成功，但會話已過期。是否重新開始訂單編輯流程？')) {
+                            // 清理 localStorage 並重定向到首頁
+                            localStorage.removeItem('liff_session_id');
+                            window.location.href = '/';
+                            return;
+                        }
+                    }
+                    
+                    alert('無法載入訂單資料\n\n可能原因：\n1. 會話已過期（超過2小時）\n2. 登入過程中參數丟失\n\n調試資訊：\nURL: ' + window.location.href + '\nParams: ' + urlParams.toString() + '\nStored Session: ' + localStorage.getItem('liff_session_id'));
+                    return;
+                }
+            }
+
+            // 從後端 API 獲取訂單資料
+            fetch(`/api/liff/orders/${sessionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        ordersData = data.orders;
+                        renderOrders();
+                    } else {
+                        alert('載入訂單失敗：' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('載入訂單失敗:', error);
+                    alert('網路錯誤，請重試');
+                });
+        }
+
+        // 渲染訂單卡片
+        function renderOrders() {
+            const container = document.getElementById('orders-container');
+            container.innerHTML = '';
+
+            ordersData.forEach((order, index) => {
+                const orderCard = createOrderCard(order, index);
+                container.appendChild(orderCard);
+            });
+        }
+
+        // 建立訂單卡片
+        function createOrderCard(order, index) {
+            const card = document.createElement('div');
+            card.className = 'order-card bg-white rounded-lg shadow-md p-6 mb-4';
+            
+            card.innerHTML = `
+                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+                    📦 訂單 ${index + 1}
+                </h3>
+                
+                <!-- 收件人資訊 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">👤 收件人資訊</label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="收件人姓名"
+                               value="${order.receiver_name || ''}"
+                               onchange="updateOrder(${index}, 'receiver_name', this.value)">
+                        <input type="tel" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="收件人電話"
+                               value="${order.receiver_phone || ''}"
+                               onchange="updateOrder(${index}, 'receiver_phone', this.value)">
+                    </div>
+                </div>
+
+                <!-- 地址 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📍 收件地址</label>
+                    <textarea class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                              rows="2"
+                              placeholder="請輸入完整地址"
+                              onchange="updateOrder(${index}, 'shipping_address', this.value)">${order.shipping_address || ''}</textarea>
+                </div>
+
+                <!-- 商品項目 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📦 商品項目</label>
+                    <div id="items-container-${index}">
+                        ${renderItemsForOrder(order.items || [], index)}
+                    </div>
+                    <button type="button" 
+                            class="mt-2 text-green-600 hover:text-green-800 text-sm font-medium"
+                            onclick="addNewItem(${index})">
+                        ➕ 新增商品
+                    </button>
+                </div>
+
+                <!-- 發貨日期 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📅 發貨日期</label>
+                    <input type="text" 
+                           class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="MM-DD (如：08-15)"
+                           value="${order.shipping_date || ''}"
+                           pattern="\\d{2}-\\d{2}"
+                           onchange="updateOrder(${index}, 'shipping_date', this.value)">
+                    <p class="text-xs text-gray-500 mt-1">格式：月-日 (如：08-15)，留空表示當日發貨</p>
+                </div>
+
+                <!-- 寄件人資訊（選填）-->
+                <details class="mb-4">
+                    <summary class="text-sm font-medium text-gray-700 cursor-pointer hover:text-green-600">
+                        🏢 寄件人資訊 (選填)
+                    </summary>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="寄件人姓名"
+                               value="${order.sender_name || ''}"
+                               onchange="updateOrder(${index}, 'sender_name', this.value)">
+                        <input type="tel" 
+                               class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                               placeholder="寄件人電話"
+                               value="${order.sender_phone || ''}"
+                               onchange="updateOrder(${index}, 'sender_phone', this.value)">
+                    </div>
+                </details>
+            `;
+            
+            return card;
+        }
+
+        // 渲染商品項目
+        function renderItemsForOrder(items, orderIndex) {
+            return items.map((item, itemIndex) => `
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="text" 
+                           class="field-input flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="商品名稱"
+                           value="${item.name || ''}"
+                           onchange="updateOrderItem(${orderIndex}, ${itemIndex}, 'name', this.value)">
+                    <input type="number" 
+                           class="field-input w-20 px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
+                           placeholder="數量"
+                           min="1"
+                           value="${item.quantity || 1}"
+                           onchange="updateOrderItem(${orderIndex}, ${itemIndex}, 'quantity', parseInt(this.value))">
+                    <button type="button" 
+                            class="text-red-500 hover:text-red-700 px-2"
+                            onclick="removeItem(${orderIndex}, ${itemIndex})">
+                        🗑️
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        // 更新訂單資料
+        function updateOrder(orderIndex, field, value) {
+            ordersData[orderIndex][field] = value;
+        }
+
+        // 更新商品項目
+        function updateOrderItem(orderIndex, itemIndex, field, value) {
+            if (!ordersData[orderIndex].items) {
+                ordersData[orderIndex].items = [];
+            }
+            ordersData[orderIndex].items[itemIndex][field] = value;
+        }
+
+        // 新增商品項目
+        function addNewItem(orderIndex) {
+            if (!ordersData[orderIndex].items) {
+                ordersData[orderIndex].items = [];
+            }
+            ordersData[orderIndex].items.push({ name: '', quantity: 1 });
+            
+            // 重新渲染該訂單的商品列表
+            const container = document.getElementById(`items-container-${orderIndex}`);
+            container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
+        }
+
+        // 移除商品項目
+        function removeItem(orderIndex, itemIndex) {
+            ordersData[orderIndex].items.splice(itemIndex, 1);
+            
+            // 重新渲染該訂單的商品列表
+            const container = document.getElementById(`items-container-${orderIndex}`);
+            container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
+        }
+
+        // 儲存變更
+        document.getElementById('save-btn').addEventListener('click', function() {
+            // 驗證資料
+            for (let i = 0; i < ordersData.length; i++) {
+                const order = ordersData[i];
+                if (!order.receiver_name || !order.receiver_phone || !order.shipping_address) {
+                    alert(`訂單 ${i + 1} 缺少必填資訊：收件人姓名、電話或地址`);
+                    return;
+                }
+                if (!order.items || order.items.length === 0) {
+                    alert(`訂單 ${i + 1} 至少需要一個商品項目`);
+                    return;
+                }
+            }
+
+            // 顯示載入中
+            document.getElementById('loading-overlay').classList.remove('hidden');
+
+            // 發送更新請求
+            fetch(`/api/liff/orders/${sessionId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    orders: ordersData
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading-overlay').classList.add('hidden');
+                
+                if (data.success) {
+                    // 發送成功訊息到 LINE
+                    liff.sendMessages([{
+                        type: 'text',
+                        text: `✅ 訂單更新成功！\n\n共更新了 ${ordersData.length} 筆訂單\n系統將自動處理並寫入 Google Sheets`
+                    }]).then(() => {
+                        liff.closeWindow();
+                    });
+                } else {
+                    alert('儲存失敗：' + data.error);
+                }
+            })
+            .catch(error => {
+                document.getElementById('loading-overlay').classList.add('hidden');
+                console.error('儲存失敗:', error);
+                alert('網路錯誤，請重試');
+            });
+        });
+
+        // 取消按鈕
+        document.getElementById('cancel-btn').addEventListener('click', function() {
+            if (confirm('確定要取消編輯嗎？所有變更將不會儲存。')) {
+                liff.closeWindow();
+            }
+        });
+
+        // 防止頁面意外關閉
+        window.addEventListener('beforeunload', function(e) {
+            e.preventDefault();
+            e.returnValue = '您有未儲存的變更，確定要離開嗎？';
+        });
+    </script>
+</body>
+</html>
