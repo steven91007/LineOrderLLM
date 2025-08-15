@@ -36,6 +36,11 @@ class ItemParser(dspy.Module):
             ).with_inputs("item_text"),
             
             dspy.Example(
+                item_text="18A禮盒 *4",
+                items_json='[{"name": "18A禮盒", "quantity": 4}]'
+            ).with_inputs("item_text"),
+            
+            dspy.Example(
                 item_text="16A蛋糕一個",
                 items_json='[{"name": "16A蛋糕", "quantity": 1}]'
             ).with_inputs("item_text"),
@@ -140,6 +145,7 @@ class ItemParser(dspy.Module):
             # 提取數量
             quantity = 1
             quantity_patterns = [
+                r'\*\s*(\d+)',  # 支援 *4 格式
                 r'x\s*(\d+)',
                 r'(\d+)\s*[個盒束份張袋包]',
                 r'(\d+)\s*$',
