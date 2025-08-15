@@ -7,6 +7,7 @@ import json
 import re
 from typing import Dict, Any, List
 import mlflow
+from ..weekday_converter import WeekdayConverter
 # 設定 MLflow 實驗名稱
 mlflow.set_experiment("line_order_experiment")
 mlflow.dspy.autolog()
@@ -92,6 +93,12 @@ class UnifiedOrderParser(dspy.Module):
             dspy.Example(
                 order_text="🩷18A禮盒（8盒） 🌸寄件人：姜正君 收件人: 徐長宏 🌸寄件人電話：0910020932 收件人電話: 091578456 🌸士林福林路377號（溪泊林工地） 送貨日期：9/11號（星期三） 🩷20A禮盒（8盒） 🌸寄件人：徐奇異 🌸收件人電話：0910020932 🌸中壢區文化路123號 送貨日期：9/11號（星期三）",
                 orders_json='[{"sender_name": "姜正君", "sender_phone": "0910020932", "receiver_name": "徐長宏", "receiver_phone": "091578456", "items": [{"name": "18A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "士林福林路377號（溪泊林工地）"}, {"sender_name": "徐奇異", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0910020932", "items": [{"name": "20A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "中壢區文化路123號"}]'
+            ).with_inputs("order_text"),
+            
+            # 支援星期幾的範例
+            dspy.Example(
+                order_text="訂購人：徐奇檍 電話：0912345678 收件人：張志文 地址：桃園市中壢區文化二路273巷 電話：0987654321 商品：18A禮盒 *4 預計出貨日：星期天",
+                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "0912345678", "receiver_name": "張志文", "receiver_phone": "0987654321", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": "12-15", "shipping_address": "桃園市中壢區文化二路273巷"}]'
             ).with_inputs("order_text")
         ]
     
@@ -188,7 +195,9 @@ class UnifiedOrderParser(dspy.Module):
    - receiver_name: 收件人姓名（必填）
    - receiver_phone: 收件人電話（必填）
    - items: 商品陣列，格式 [{{"name": "商品名稱", "quantity": 數量}}]
-   - shipping_date: 發貨日期（選填，只處理月份和日期，格式 MM-DD 或 null，不包含年份）
+   - shipping_date: 發貨日期（選填，格式 MM-DD 或 null）
+     • 若為星期幾（如：星期天、星期三），轉換為下個該星期的日期
+     • 若為具體日期，轉換為 MM-DD 格式
    - shipping_address: 收件地址（必填）
 
 3. 商品解析特別規則：
@@ -262,12 +271,18 @@ class UnifiedOrderParser(dspy.Module):
         return cleaned_items
     
     def _clean_date(self, value: Any) -> str:
-        """清理日期格式，只保留月份和日期"""
+        """清理日期格式，支援星期幾轉換"""
         if value is None or str(value).strip() == '':
             return None
         
         date_str = str(value).strip()
         
+        # 優先使用 WeekdayConverter 處理
+        converted_date = WeekdayConverter.parse_shipping_date(date_str)
+        if converted_date:
+            return converted_date
+        
+        # 如果 WeekdayConverter 無法處理，使用原本的邏輯
         # 如果是完整的 YYYY-MM-DD 格式，提取月份和日期
         if len(date_str) == 10 and date_str.count('-') == 2:
             parts = date_str.split('-')
