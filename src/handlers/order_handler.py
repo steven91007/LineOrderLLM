@@ -798,6 +798,7 @@ class OrderHandler:
             success_count = len(orders)
             order_ids = [order['order_id'] for order in orders]
             failed_orders = []
+            result = {'success': True}  # 初始化 result 變數
         
         total_orders = len(orders)
         
@@ -809,7 +810,7 @@ class OrderHandler:
             )
             
             # 顯示按工作表分組的資訊
-            if hasattr(result, 'get') and result.get('sheet_results'):
+            if isinstance(result, dict) and result.get('sheet_results'):
                 sheet_results = result.get('sheet_results', {})
                 sheets_used = result.get('sheets_used', [])
                 
