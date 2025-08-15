@@ -145,6 +145,12 @@ class UnifiedOrderParser(dspy.Module):
             for order in orders:
                 if isinstance(order, dict):
                     cleaned_order = self._clean_order_data(order)
+                    
+                    # 總是嘗試從原始文字中重新提取日期（優先於 DSPy 解析結果）
+                    date_from_text = self._extract_date_from_text(cleaned_text)
+                    if date_from_text:
+                        cleaned_order['shipping_date'] = date_from_text
+                    
                     # 只保留有效的訂單（至少要有收件人和地址）
                     if (cleaned_order.get('receiver_name') and 
                         cleaned_order.get('shipping_address')):
@@ -442,6 +448,30 @@ class UnifiedOrderParser(dspy.Module):
             items.append({"name": item_text, "quantity": 1})
         
         return items
+    
+    def _extract_date_from_text(self, text: str) -> str:
+        """從原始文字中提取日期資訊"""
+        # 查找星期關鍵字
+        import re
+        
+        # 尋找包含星期的文字段落
+        weekday_patterns = [
+            r'預計出貨日[：:]?\s*([星期週禮拜]+[一二三四五六七日天末])',
+            r'出貨日[：:]?\s*([星期週禮拜]+[一二三四五六七日天末])',
+            r'發貨日期[：:]?\s*([星期週禮拜]+[一二三四五六七日天末])',
+            r'送貨日期[：:]?\s*([星期週禮拜]+[一二三四五六七日天末])',
+            r'([星期週禮拜]+[一二三四五六七日天末])',
+        ]
+        
+        for pattern in weekday_patterns:
+            match = re.search(pattern, text)
+            if match:
+                weekday_str = match.group(1) if len(match.groups()) > 0 else match.group(0)
+                date_result = WeekdayConverter.parse_shipping_date(weekday_str)
+                if date_result:
+                    return date_result
+        
+        return None
 
 
 # 建立全域實例供其他模組使用
