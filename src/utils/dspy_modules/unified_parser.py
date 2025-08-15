@@ -70,6 +70,18 @@ class UnifiedOrderParser(dspy.Module):
                 orders_json='[{"sender_name": "王小明", "sender_phone": "0912345678", "receiver_name": "李大華", "receiver_phone": "0987654321", "items": [{"name": "18A禮盒", "quantity": 2}], "shipping_date": null, "shipping_address": "台北市中正區重慶南路100號"}, {"sender_name": "張三", "sender_phone": "0911111111", "receiver_name": "李四", "receiver_phone": "0922222222", "items": [{"name": "20A蛋糕", "quantity": 1}], "shipping_date": null, "shipping_address": "台中市西區民權路200號"}]'
             ).with_inputs("order_text"),
             
+            # 支援 *數量 格式的範例
+            dspy.Example(
+                order_text="訂購人：徐奇檍 訂購人電話：091767778 收件人：張志文 收件人地址：桃園市中壢區文化二路273巷 收件人電話：0981768 數量：18A禮盒 *4 預計出貨日：星期天",
+                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "091767778", "receiver_name": "張志文", "receiver_phone": "0981768", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": null, "shipping_address": "桃園市中壢區文化二路273巷"}]'
+            ).with_inputs("order_text"),
+            
+            # 使用 *符號表示數量的商品範例
+            dspy.Example(
+                order_text="收件人：林小姐 電話：0955666777 地址：新北市新店區北新路100號 商品：16A蛋糕 *2, 20A花束 *1",
+                orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "林小姐", "receiver_phone": "0955666777", "items": [{"name": "16A蛋糕", "quantity": 2}, {"name": "20A花束", "quantity": 1}], "shipping_date": null, "shipping_address": "新北市新店區北新路100號"}]'
+            ).with_inputs("order_text"),
+            
             # 收件人姓名缺失的範例（智能推斷收件人）
             dspy.Example(
                 order_text="🩷12A巧克力禮盒（3盒） 🌸寄件人：陳老師 🌸收件人電話：0933333333 🌸新北市板橋區文化路300號 🩷16A花束（1束） 🌸寄件人：林同學 🌸收件人電話：0944444444 🌸桃園市中壢區中正路400號",
@@ -182,7 +194,8 @@ class UnifiedOrderParser(dspy.Module):
 3. 商品解析特別規則：
    - 保留所有數字編號（如 18A、16A、20A 等）
    - 保留括號內容（如 (客製包裝)、(工地) 等）
-   - 識別各種數量表達：x2、兩個、3盒、一束等
+   - 識別各種數量表達：x2、*2、兩個、3盒、一束等
+   - 支援 * 符號表示數量（如 18A禮盒 *4）
    - 多商品用逗號分隔
 
 4. 多訂單判斷：
@@ -223,8 +236,8 @@ class UnifiedOrderParser(dspy.Module):
         if value is None or str(value).strip() == '':
             return None
         phone = str(value).strip()
-        # 基本電話號碼格式驗證
-        if len(phone) < 8:
+        # 基本電話號碼格式驗證（允許較短的電話號碼用於特殊情況）
+        if len(phone) < 7:
             return None
         return phone
     
@@ -388,6 +401,7 @@ class UnifiedOrderParser(dspy.Module):
             # 提取數量
             quantity = 1
             quantity_patterns = [
+                r'\*\s*(\d+)',  # 支援 *4 格式
                 r'x\s*(\d+)',
                 r'(\d+)\s*[個盒束份張袋包]',
                 r'(\d+)\s*$',
