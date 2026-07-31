@@ -58,3 +58,17 @@
 - **保留產品編號**：如 `18A禮盒`、`16A蛋糕`、`20A花束` 等
 - 支援各種數量表達方式：`x2`、`兩個`、`3盒` 等
 - 處理多商品組合：`18A禮盒 x1, 16A蛋糕 x3`
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `steven91007/LineOrderLLM`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage labels, used as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/agents/domain.md`.

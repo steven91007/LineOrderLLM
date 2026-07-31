@@ -5,7 +5,8 @@
 import dspy
 import json
 import re
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 import mlflow
 from ..weekday_converter import WeekdayConverter
 # 設定 MLflow 實驗名稱
@@ -21,9 +22,11 @@ class UnifiedOrderSignature(dspy.Signature):
     - 單一訂單：[{訂單1}]
     - 多訂單：[{訂單1}, {訂單2}, ...]
     - 包含改進的商品解析邏輯，保留產品編號
+    - 準確的日期轉換，基於提供的當前日期
     """
     order_text = dspy.InputField(desc="原始訂單文字，可能包含單一或多個訂單")
-    orders_json = dspy.OutputField(desc="解析後的訂單陣列 JSON，格式：[{\"sender_name\": null, \"sender_phone\": null, \"receiver_name\": \"收件人\", \"receiver_phone\": \"電話\", \"items\": [{\"name\": \"商品名稱\", \"quantity\": 數量}], \"shipping_date\": null, \"shipping_address\": \"地址\"}]")
+    current_date = dspy.InputField(desc="當前日期，格式：YYYY-MM-DD (星期X)，用於星期幾轉換的參考基準")
+    orders_json = dspy.OutputField(desc="解析後的訂單陣列 JSON，格式：[{\"sender_name\": null, \"sender_phone\": null, \"receiver_name\": \"收件人\", \"receiver_phone\": \"電話\", \"items\": [{\"name\": \"商品名稱\", \"quantity\": 數量}], \"shipping_date\": \"MM-DD\", \"shipping_address\": \"地址\"}]")
 
 
 class UnifiedOrderParser(dspy.Module):
@@ -38,82 +41,120 @@ class UnifiedOrderParser(dspy.Module):
             # 單一訂單範例
             dspy.Example(
                 order_text="收件人：王小明 電話：0912345678 地址：台北市中正區重慶南路一段122號 商品：18A禮盒 x2",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "王小明", "receiver_phone": "0912345678", "items": [{"name": "18A禮盒", "quantity": 2}], "shipping_date": null, "shipping_address": "台北市中正區重慶南路一段122號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 多商品單一訂單範例
             dspy.Example(
                 order_text="收件人：李美華 電話：0987654321 地址：高雄市前金區中正四路211號 商品：16A蛋糕 x1, 20A花束 x3",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "李美華", "receiver_phone": "0987654321", "items": [{"name": "16A蛋糕", "quantity": 1}, {"name": "20A花束", "quantity": 3}], "shipping_date": null, "shipping_address": "高雄市前金區中正四路211號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 多訂單範例
             dspy.Example(
                 order_text="1. 收件人：張三 電話：0911111111 地址：台中市西區民權路100號 商品：12A巧克力禮盒 x1 2. 收件人：李四 電話：0922222222 地址：台南市東區東門路200號 商品：24A生日蛋糕 x2",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "張三", "receiver_phone": "0911111111", "items": [{"name": "12A巧克力禮盒", "quantity": 1}], "shipping_date": null, "shipping_address": "台中市西區民權路100號"}, {"sender_name": null, "sender_phone": null, "receiver_name": "李四", "receiver_phone": "0922222222", "items": [{"name": "24A生日蛋糕", "quantity": 2}], "shipping_date": null, "shipping_address": "台南市東區東門路200號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 包含寄件人資訊的範例
             dspy.Example(
                 order_text="寄件人：ABC公司 電話：02-12345678 收件人：陳小姐 電話：0933333333 地址：新北市板橋區文化路300號 商品：18A特製禮盒(客製包裝) x1 發貨日期：01-15",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": "ABC公司", "sender_phone": "02-12345678", "receiver_name": "陳小姐", "receiver_phone": "0933333333", "items": [{"name": "18A特製禮盒(客製包裝)", "quantity": 1}], "shipping_date": "01-15", "shipping_address": "新北市板橋區文化路300號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 沒有產品編號的商品範例
             dspy.Example(
                 order_text="收件人：劉先生 電話：0944444444 地址：桃園市中壢區中正路500號 商品：鳳梨酥禮盒 x2, 牛軋糖 x1",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "劉先生", "receiver_phone": "0944444444", "items": [{"name": "鳳梨酥禮盒", "quantity": 2}, {"name": "牛軋糖", "quantity": 1}], "shipping_date": null, "shipping_address": "桃園市中壢區中正路500號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 使用 emoji 分隔符的多訂單範例
             dspy.Example(
                 order_text="🩷18A禮盒（2盒） 🌸寄件人：王小明 收件人: 李大華 🌸寄件人電話：0912345678 收件人電話: 0987654321 🌸台北市中正區重慶南路100號 送貨日期：1/15號 🩷20A蛋糕（1個） 🌸寄件人：張三 收件人: 李四 🌸寄件人電話：0911111111 收件人電話: 0922222222 🌸台中市西區民權路200號 送貨日期：1/16號",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": "王小明", "sender_phone": "0912345678", "receiver_name": "李大華", "receiver_phone": "0987654321", "items": [{"name": "18A禮盒", "quantity": 2}], "shipping_date": null, "shipping_address": "台北市中正區重慶南路100號"}, {"sender_name": "張三", "sender_phone": "0911111111", "receiver_name": "李四", "receiver_phone": "0922222222", "items": [{"name": "20A蛋糕", "quantity": 1}], "shipping_date": null, "shipping_address": "台中市西區民權路200號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
-            # 支援 *數量 格式的範例
+            # 支援 *數量 格式的範例（展示星期天轉換）
             dspy.Example(
                 order_text="訂購人：徐奇檍 訂購人電話：091767778 收件人：張志文 收件人地址：桃園市中壢區文化二路273巷 收件人電話：0981768 數量：18A禮盒 *4 預計出貨日：星期天",
-                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "091767778", "receiver_name": "張志文", "receiver_phone": "0981768", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": null, "shipping_address": "桃園市中壢區文化二路273巷"}]'
-            ).with_inputs("order_text"),
+                current_date="2024-08-15 (星期四)",
+                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "091767778", "receiver_name": "張志文", "receiver_phone": "0981768", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": "08-18", "shipping_address": "桃園市中壢區文化二路273巷"}]'
+            ).with_inputs("order_text", "current_date"),
             
             # 使用 *符號表示數量的商品範例
             dspy.Example(
                 order_text="收件人：林小姐 電話：0955666777 地址：新北市新店區北新路100號 商品：16A蛋糕 *2, 20A花束 *1",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": null, "sender_phone": null, "receiver_name": "林小姐", "receiver_phone": "0955666777", "items": [{"name": "16A蛋糕", "quantity": 2}, {"name": "20A花束", "quantity": 1}], "shipping_date": null, "shipping_address": "新北市新店區北新路100號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 收件人姓名缺失的範例（智能推斷收件人）
             dspy.Example(
                 order_text="🩷12A巧克力禮盒（3盒） 🌸寄件人：陳老師 🌸收件人電話：0933333333 🌸新北市板橋區文化路300號 🩷16A花束（1束） 🌸寄件人：林同學 🌸收件人電話：0944444444 🌸桃園市中壢區中正路400號",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": "陳老師", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0933333333", "items": [{"name": "12A巧克力禮盒", "quantity": 3}], "shipping_date": null, "shipping_address": "新北市板橋區文化路300號"}, {"sender_name": "林同學", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0944444444", "items": [{"name": "16A花束", "quantity": 1}], "shipping_date": null, "shipping_address": "桃園市中壢區中正路400號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
             # 真實案例：類似用戶提供的格式
             dspy.Example(
                 order_text="🩷18A禮盒（8盒） 🌸寄件人：姜正君 收件人: 徐長宏 🌸寄件人電話：0910020932 收件人電話: 091578456 🌸士林福林路377號（溪泊林工地） 送貨日期：9/11號（星期三） 🩷20A禮盒（8盒） 🌸寄件人：徐奇異 🌸收件人電話：0910020932 🌸中壢區文化路123號 送貨日期：9/11號（星期三）",
+                current_date="2024-08-15 (星期四)",
                 orders_json='[{"sender_name": "姜正君", "sender_phone": "0910020932", "receiver_name": "徐長宏", "receiver_phone": "091578456", "items": [{"name": "18A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "士林福林路377號（溪泊林工地）"}, {"sender_name": "徐奇異", "sender_phone": null, "receiver_name": "收件人", "receiver_phone": "0910020932", "items": [{"name": "20A禮盒", "quantity": 8}], "shipping_date": "09-11", "shipping_address": "中壢區文化路123號"}]'
-            ).with_inputs("order_text"),
+            ).with_inputs("order_text", "current_date"),
             
-            # 支援星期幾的範例
+            # 支援星期幾的範例（展示正確的日期推理）
             dspy.Example(
                 order_text="訂購人：徐奇檍 電話：0912345678 收件人：張志文 地址：桃園市中壢區文化二路273巷 電話：0987654321 商品：18A禮盒 *4 預計出貨日：星期天",
-                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "0912345678", "receiver_name": "張志文", "receiver_phone": "0987654321", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": "12-15", "shipping_address": "桃園市中壢區文化二路273巷"}]'
-            ).with_inputs("order_text")
+                current_date="2024-08-15 (星期四)",
+                orders_json='[{"sender_name": "徐奇檍", "sender_phone": "0912345678", "receiver_name": "張志文", "receiver_phone": "0987654321", "items": [{"name": "18A禮盒", "quantity": 4}], "shipping_date": "08-18", "shipping_address": "桃園市中壢區文化二路273巷"}]'
+            ).with_inputs("order_text", "current_date"),
+            
+            # 支援絕對日期格式的範例（9/20格式）
+            dspy.Example(
+                order_text="訂購人：李小明 電話：0911111111 收件人：王大華 地址：台北市信義區信義路100號 電話：0922222222 商品：20A花束 *2 發貨日期：9/20",
+                current_date="2024-08-15 (星期四)",
+                orders_json='[{"sender_name": "李小明", "sender_phone": "0911111111", "receiver_name": "王大華", "receiver_phone": "0922222222", "items": [{"name": "20A花束", "quantity": 2}], "shipping_date": "09-20", "shipping_address": "台北市信義區信義路100號"}]'
+            ).with_inputs("order_text", "current_date"),
+            
+            # 支援絕對日期格式的範例（9-20格式）
+            dspy.Example(
+                order_text="訂購人：陳美麗 電話：0933333333 收件人：林志偉 地址：高雄市前鎮區民權二路250號 電話：0944444444 商品：16A蛋糕 *1 出貨日：9-20",
+                current_date="2024-08-15 (星期四)",
+                orders_json='[{"sender_name": "陳美麗", "sender_phone": "0933333333", "receiver_name": "林志偉", "receiver_phone": "0944444444", "items": [{"name": "16A蛋糕", "quantity": 1}], "shipping_date": "09-20", "shipping_address": "高雄市前鎮區民權二路250號"}]'
+            ).with_inputs("order_text", "current_date"),
+            
+            # 支援多種日期格式混合的範例
+            dspy.Example(
+                order_text="訂購人：張小華 電話：0955555555 收件人：劉建國 地址：新竹市東區光復路300號 電話：0966666666 商品：12A巧克力 *3 送貨日期：10/15號",
+                current_date="2024-08-15 (星期四)",
+                orders_json='[{"sender_name": "張小華", "sender_phone": "0955555555", "receiver_name": "劉建國", "receiver_phone": "0966666666", "items": [{"name": "12A巧克力", "quantity": 3}], "shipping_date": "10-15", "shipping_address": "新竹市東區光復路300號"}]'
+            ).with_inputs("order_text", "current_date")
         ]
     
-    def forward(self, order_text: str) -> dspy.Prediction:
+    def forward(self, order_text: str, reference_date: Optional[datetime] = None) -> dspy.Prediction:
         """
         統一解析訂單文字
         
         Args:
             order_text: 原始訂單文字
+            reference_date: 用於星期幾轉換的參考日期，預設為當前時間
             
         Returns:
             dspy.Prediction: 包含 orders_json (string)，永遠是陣列格式
         """
         if not order_text or not isinstance(order_text, str):
             return dspy.Prediction(orders_json='[]')
+        
+        # 設定參考日期
+        if reference_date is None:
+            reference_date = datetime.now()
+        self._reference_date = reference_date
         
         # 預處理：移除多餘空白
         cleaned_text = self._preprocess_text(order_text)
@@ -122,8 +163,12 @@ class UnifiedOrderParser(dspy.Module):
             # 建立詳細的解析提示
             enhanced_prompt = self._create_parsing_prompt(cleaned_text)
             
-            # 使用 DSPy 進行解析
-            result = self.parse(order_text=enhanced_prompt)
+            # 格式化當前日期
+            current_date_str = reference_date.strftime('%Y-%m-%d (%A)')
+            current_date_str = current_date_str.replace('Monday', '星期一').replace('Tuesday', '星期二').replace('Wednesday', '星期三').replace('Thursday', '星期四').replace('Friday', '星期五').replace('Saturday', '星期六').replace('Sunday', '星期日')
+            
+            # 使用 DSPy 進行解析，傳入當前日期
+            result = self.parse(order_text=enhanced_prompt, current_date=current_date_str)
             
             # 驗證和處理 JSON
             parsed_json = result.orders_json
@@ -146,10 +191,11 @@ class UnifiedOrderParser(dspy.Module):
                 if isinstance(order, dict):
                     cleaned_order = self._clean_order_data(order)
                     
-                    # 總是嘗試從原始文字中重新提取日期（優先於 DSPy 解析結果）
-                    date_from_text = self._extract_date_from_text(cleaned_text)
-                    if date_from_text:
-                        cleaned_order['shipping_date'] = date_from_text
+                    # 只有當DSPy沒有提供有效日期時，才從原始文字提取作為fallback
+                    if not cleaned_order.get('shipping_date'):
+                        date_from_text = self._extract_date_from_text(cleaned_text, self._reference_date)
+                        if date_from_text:
+                            cleaned_order['shipping_date'] = date_from_text
                     
                     # 只保留有效的訂單（至少要有收件人和地址）
                     if (cleaned_order.get('receiver_name') and 
@@ -189,9 +235,16 @@ class UnifiedOrderParser(dspy.Module):
     
     def _create_parsing_prompt(self, order_text: str) -> str:
         """建立詳細的解析提示"""
+        # 取得當前日期和星期幾轉換對照表
+        current_date = getattr(self, '_reference_date', datetime.now())
+        weekday_map = self._generate_weekday_conversion_table(current_date)
+        
         return f"""請解析以下訂單內容並輸出 JSON 陣列格式：
 
 {order_text}
+
+重要：當前日期信息
+{weekday_map}
 
 解析規則：
 1. 永遠返回陣列格式，單一訂單也要包在陣列中：[{{訂單1}}] 或 [{{訂單1}}, {{訂單2}}, ...]
@@ -202,8 +255,9 @@ class UnifiedOrderParser(dspy.Module):
    - receiver_phone: 收件人電話（必填）
    - items: 商品陣列，格式 [{{"name": "商品名稱", "quantity": 數量}}]
    - shipping_date: 發貨日期（選填，格式 MM-DD 或 null）
-     • 若為星期幾（如：星期天、星期三），轉換為下個該星期的日期
-     • 若為具體日期，轉換為 MM-DD 格式
+     • 若為星期幾，請使用上方提供的「星期幾轉換對照表」進行精確轉換
+     • 若為絕對日期（如：9/20、9-20、9月20日、10/15號），直接轉換為 MM-DD 格式（如：09-20、10-15）
+     • 若為其他具體日期格式，統一轉換為 MM-DD 格式
    - shipping_address: 收件地址（必填）
 
 3. 商品解析特別規則：
@@ -283,8 +337,26 @@ class UnifiedOrderParser(dspy.Module):
         
         date_str = str(value).strip()
         
-        # 優先使用 WeekdayConverter 處理
-        converted_date = WeekdayConverter.parse_shipping_date(date_str)
+        # 如果已經是正確的MM-DD格式，直接返回（信任DSPy的結果）
+        if len(date_str) == 5 and date_str.count('-') == 1:
+            try:
+                # 驗證格式是否正確（MM-DD）
+                parts = date_str.split('-')
+                if (len(parts) == 2 and 
+                    parts[0].isdigit() and parts[1].isdigit() and
+                    1 <= int(parts[0]) <= 12 and 1 <= int(parts[1]) <= 31):
+                    return date_str
+            except:
+                pass
+        
+        # 優先嘗試解析為絕對日期（9/20, 9-20等格式）
+        absolute_date = WeekdayConverter.parse_absolute_date(date_str)
+        if absolute_date:
+            return absolute_date
+        
+        # 只有非MM-DD格式的日期才使用 WeekdayConverter 處理
+        reference_date = getattr(self, '_reference_date', datetime.now())
+        converted_date = WeekdayConverter.parse_shipping_date(date_str, reference_date)
         if converted_date:
             return converted_date
         
@@ -449,10 +521,13 @@ class UnifiedOrderParser(dspy.Module):
         
         return items
     
-    def _extract_date_from_text(self, text: str) -> str:
+    def _extract_date_from_text(self, text: str, reference_date: Optional[datetime] = None) -> str:
         """從原始文字中提取日期資訊"""
         # 查找星期關鍵字
         import re
+        
+        if reference_date is None:
+            reference_date = datetime.now()
         
         # 尋找包含星期的文字段落
         weekday_patterns = [
@@ -467,11 +542,34 @@ class UnifiedOrderParser(dspy.Module):
             match = re.search(pattern, text)
             if match:
                 weekday_str = match.group(1) if len(match.groups()) > 0 else match.group(0)
-                date_result = WeekdayConverter.parse_shipping_date(weekday_str)
+                date_result = WeekdayConverter.parse_shipping_date(weekday_str, reference_date)
                 if date_result:
                     return date_result
         
         return None
+    
+    def _generate_weekday_conversion_table(self, reference_date: datetime) -> str:
+        """生成星期幾轉換對照表"""
+        from ..weekday_converter import WeekdayConverter
+        
+        current_weekday = WeekdayConverter.get_weekday_name(reference_date)
+        current_date_str = reference_date.strftime('%Y-%m-%d')
+        
+        weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+        
+        result = f"當前日期：{current_date_str} ({current_weekday})\n"
+        result += "星期幾轉換對照表：\n"
+        
+        for weekday in weekdays:
+            converted_date = WeekdayConverter.get_next_weekday_date(weekday, reference_date)
+            if converted_date:
+                result += f"- {weekday} → {converted_date}\n"
+        
+        result += "\n絕對日期格式轉換規則：\n"
+        result += "- 9/20、9-20、9月20日、10/15號 → 09-20、10-15（統一為 MM-DD 格式）\n"
+        result += "- 如果是絕對日期，請直接轉換格式，不要參考當前日期\n"
+        
+        return result
 
 
 # 建立全域實例供其他模組使用

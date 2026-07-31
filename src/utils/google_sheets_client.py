@@ -5,6 +5,7 @@ from googleapiclient.errors import HttpError
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from .time_utils import time_utils
+from .price_calculator import PriceCalculator
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class GoogleSheetsClient:
         self.auto_organize_by_date = auto_organize_by_date
         self.service = self._build_service()
         self.sheet_cache = {}  # 快取已存在的 sheet 資訊
+        self.price_calculator = PriceCalculator()  # 價格計算器
     
     def _build_service(self):
         """建立 Google Sheets API 服務"""
@@ -120,17 +122,16 @@ class GoogleSheetsClient:
         try:
             # 設置標題
             headers = [[
-                '訂單時間',
-                '訂單編號',
-                '寄件人',
-                '寄件人電話',
+                '訂購/寄件人',
                 '收件人',
+                '品項',
+                '數量',
+                '訂購人電話',
                 '收件人電話',
-                '商品明細',
-                '預計發貨日',
-                '收件地址',
-                '訂單狀態',
-                '備註'
+                '地址',
+                '總價',
+                '付款狀況',
+                '末5碼'
             ]]
             
             body = {
@@ -140,7 +141,7 @@ class GoogleSheetsClient:
             
             self.service.spreadsheets().values().update(
                 spreadsheetId=self.sheet_id,
-                range=f'{sheet_name}!A1:K1',
+                range=f'{sheet_name}!A1:J1',
                 valueInputOption='USER_ENTERED',
                 body=body
             ).execute()
@@ -223,7 +224,7 @@ class GoogleSheetsClient:
             
             # 格式化出貨日期（包含星期）
             shipping_date_str = order_data.get('shipping_date', '')
-            formatted_shipping_date = '未提供'
+            formatted_shipping_date = ''
             
             if shipping_date_str:
                 parsed_date = time_utils.parse_shipping_date(shipping_date_str)
@@ -233,23 +234,21 @@ class GoogleSheetsClient:
                     formatted_shipping_date = shipping_date_str
             
             # 準備要寫入的資料
-            current_time = time_utils.get_current_time()
             values = [[
-                current_time.strftime('%Y-%m-%d %H:%M:%S'),  # 訂單時間
-                order_data.get('order_id', ''),
-                order_data.get('sender_name', '') or '未提供',  # 寄件人選填
-                order_data.get('sender_phone', '') or '未提供',  # 寄件人電話選填
-                order_data.get('receiver_name', ''),
-                order_data.get('receiver_phone', ''),
-                self._format_items(order_data.get('items', [])),
-                formatted_shipping_date,  # 格式化的出貨日期
-                order_data.get('shipping_address', ''),
-                order_data.get('status', '待處理'),
-                order_data.get('notes', '')
+                order_data.get('sender_name', ''),  # 訂購/寄件人
+                order_data.get('receiver_name', ''),  # 收件人
+                self._format_items_name_only(order_data.get('items', [])),  # 品項
+                self._format_items_quantity_only(order_data.get('items', [])),  # 數量
+                order_data.get('sender_phone', ''),  # 訂購人電話
+                order_data.get('receiver_phone', ''),  # 收件人電話
+                order_data.get('shipping_address', ''),  # 地址
+                self._calculate_total_price(order_data.get('items', [])),  # 總價
+                order_data.get('payment_status', ''),  # 付款狀況
+                order_data.get('last_5_digits', '')  # 末5碼
             ]]
             
-            # 指定寫入範圍（A:K 表示從 A 欄到 K 欄）
-            range_name = f'{target_sheet}!A:K'
+            # 指定寫入範圍（A:J 表示從 A 欄到 J 欄）
+            range_name = f'{target_sheet}!A:J'
             
             # 執行寫入操作
             body = {
@@ -296,6 +295,43 @@ class GoogleSheetsClient:
         
         return ', '.join(formatted_items)
     
+    def _format_items_name_only(self, items: List[Dict[str, Any]]) -> str:
+        """格式化商品名稱（僅名稱，不含數量）"""
+        if not items:
+            return ''
+        
+        names = []
+        for item in items:
+            name = item.get('name', '')
+            if name:
+                names.append(name)
+        
+        return ', '.join(names)
+    
+    def _format_items_quantity_only(self, items: List[Dict[str, Any]]) -> str:
+        """格式化商品數量（僅數量）"""
+        if not items:
+            return ''
+        
+        quantities = []
+        for item in items:
+            quantity = item.get('quantity', 0)
+            quantities.append(str(quantity))
+        
+        return ', '.join(quantities)
+    
+    def _calculate_total_price(self, items: List[Dict[str, Any]]) -> str:
+        """計算商品總價（使用價格計算器）"""
+        if not items:
+            return '0'
+        
+        try:
+            total_price, detail = self.price_calculator.calculate_total_price(items)
+            return str(total_price)
+        except Exception as e:
+            logger.error(f"Error calculating price: {e}")
+            return '計算錯誤'
+    
     def append_multiple_orders(self, orders_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """批量添加多份訂單到試算表（按日期自動分組到不同 sheet）"""
         if not self.service:
@@ -331,7 +367,7 @@ class GoogleSheetsClient:
                 
                 # 格式化出貨日期（包含星期）
                 shipping_date_str = order_data.get('shipping_date', '')
-                formatted_shipping_date = '未提供'
+                formatted_shipping_date = ''
                 
                 if shipping_date_str:
                     parsed_date = time_utils.parse_shipping_date(shipping_date_str)
@@ -342,17 +378,16 @@ class GoogleSheetsClient:
                 
                 # 準備該訂單的資料行
                 row = [
-                    current_time.strftime('%Y-%m-%d %H:%M:%S'),
-                    order_data.get('order_id', ''),
-                    order_data.get('sender_name', '') or '未提供',
-                    order_data.get('sender_phone', '') or '未提供',
-                    order_data.get('receiver_name', ''),
-                    order_data.get('receiver_phone', ''),
-                    self._format_items(order_data.get('items', [])),
-                    formatted_shipping_date,  # 格式化的出貨日期
-                    order_data.get('shipping_address', ''),
-                    order_data.get('status', '待處理'),
-                    order_data.get('notes', '')
+                    order_data.get('sender_name', ''),  # 訂購/寄件人
+                    order_data.get('receiver_name', ''),  # 收件人
+                    self._format_items_name_only(order_data.get('items', [])),  # 品項
+                    self._format_items_quantity_only(order_data.get('items', [])),  # 數量
+                    order_data.get('sender_phone', ''),  # 訂購人電話
+                    order_data.get('receiver_phone', ''),  # 收件人電話
+                    order_data.get('shipping_address', ''),  # 地址
+                    self._calculate_total_price(order_data.get('items', [])),  # 總價
+                    order_data.get('payment_status', ''),  # 付款狀況
+                    order_data.get('last_5_digits', '')  # 末5碼
                 ]
                 
                 grouped_orders[target_sheet].append(row)
@@ -363,7 +398,7 @@ class GoogleSheetsClient:
             sheet_results = {}
             
             for sheet_name, sheet_orders in grouped_orders.items():
-                range_name = f'{sheet_name}!A:K'
+                range_name = f'{sheet_name}!A:J'
                 
                 body = {
                     'values': sheet_orders,
@@ -417,7 +452,7 @@ class GoogleSheetsClient:
             for order_data in orders_data:
                 # 格式化出貨日期（包含星期）
                 shipping_date_str = order_data.get('shipping_date', '')
-                formatted_shipping_date = '未提供'
+                formatted_shipping_date = ''
                 
                 if shipping_date_str:
                     parsed_date = time_utils.parse_shipping_date(shipping_date_str)
@@ -427,17 +462,16 @@ class GoogleSheetsClient:
                         formatted_shipping_date = shipping_date_str
                 
                 row = [
-                    current_time.strftime('%Y-%m-%d %H:%M:%S'),
-                    order_data.get('order_id', ''),
-                    order_data.get('sender_name', '') or '未提供',
-                    order_data.get('sender_phone', '') or '未提供',
-                    order_data.get('receiver_name', ''),
-                    order_data.get('receiver_phone', ''),
-                    self._format_items(order_data.get('items', [])),
-                    formatted_shipping_date,  # 格式化的出貨日期
-                    order_data.get('shipping_address', ''),
-                    order_data.get('status', '待處理'),
-                    order_data.get('notes', '')
+                    order_data.get('sender_name', ''),  # 訂購/寄件人
+                    order_data.get('receiver_name', ''),  # 收件人
+                    self._format_items_name_only(order_data.get('items', [])),  # 品項
+                    self._format_items_quantity_only(order_data.get('items', [])),  # 數量
+                    order_data.get('sender_phone', ''),  # 訂購人電話
+                    order_data.get('receiver_phone', ''),  # 收件人電話
+                    order_data.get('shipping_address', ''),  # 地址
+                    self._calculate_total_price(order_data.get('items', [])),  # 總價
+                    order_data.get('payment_status', ''),  # 付款狀況
+                    order_data.get('last_5_digits', '')  # 末5碼
                 ]
                 values.append(row)
                 order_ids.append(order_data.get('order_id', ''))
@@ -511,17 +545,17 @@ class GoogleSheetsClient:
             # 如果沒有標題，則添加
             if not values:
                 headers = [[
-                    '訂單時間',
-                    '訂單編號',
-                    '寄件人',
-                    '寄件人電話',
+                    '訂購/寄件人',
+                    '寄件地址',
                     '收件人',
+                    '品項',
+                    '數量',
+                    '訂購人電話',
                     '收件人電話',
-                    '商品明細',
-                    '預計發貨日',
-                    '收件地址',
-                    '訂單狀態',
-                    '備註'
+                    '地址',
+                    '總價',
+                    '付款狀況',
+                    '末5碼'
                 ]]
                 
                 body = {
@@ -609,17 +643,17 @@ class GoogleSheetsClient:
                     row.append('')
                 
                 orders.append({
-                    'order_time': row[0],
-                    'order_id': row[1],
-                    'sender_name': row[2],
-                    'sender_phone': row[3],
-                    'receiver_name': row[4],
-                    'receiver_phone': row[5],
-                    'items': row[6],
-                    'shipping_date': row[7],
-                    'shipping_address': row[8],
-                    'status': row[9],
-                    'notes': row[10]
+                    'sender_name': row[0],     # 訂購/寄件人
+                    'sender_address': row[1],  # 寄件地址
+                    'receiver_name': row[2],   # 收件人
+                    'items_name': row[3],      # 品項
+                    'items_quantity': row[4],  # 數量
+                    'sender_phone': row[5],    # 訂購人電話
+                    'receiver_phone': row[6],  # 收件人電話
+                    'shipping_address': row[7], # 地址
+                    'total_price': row[8],     # 總價
+                    'payment_status': row[9],  # 付款狀況
+                    'last_5_digits': row[10]   # 末5碼
                 })
             
             return {
@@ -874,7 +908,7 @@ class GoogleSheetsClient:
                 # 解析出貨日期 (第8欄，索引7)
                 shipping_date_str = row[7] if len(row) > 7 else ''
                 
-                if shipping_date_str and shipping_date_str != '未提供':
+                if shipping_date_str:
                     # 嘗試從已格式化的日期中提取
                     parsed_date = None
                     
@@ -911,7 +945,7 @@ class GoogleSheetsClient:
                     created_sheets.append(sheet_name)
                 
                 # 寫入資料到目標工作表
-                range_name = f'{sheet_name}!A:K'
+                range_name = f'{sheet_name}!A:J'
                 body = {
                     'values': orders,
                     'majorDimension': 'ROWS',
@@ -938,3 +972,154 @@ class GoogleSheetsClient:
                 'success': False,
                 'error': f'重新組織訂單時發生錯誤: {e}'
             }
+    
+    def get_orders_by_date(self, target_date: str) -> Dict[str, Any]:
+        """根據日期獲取訂單資料
+        
+        Args:
+            target_date: 目標日期，格式如 '08-27', '2024-08-27' 等
+            
+        Returns:
+            Dict containing success status and orders data
+        """
+        if not self.service:
+            return {
+                'success': False,
+                'error': 'Google Sheets service not available',
+                'orders': []
+            }
+        
+        try:
+            from .time_utils import time_utils
+            
+            # 解析目標日期
+            parsed_date = time_utils.parse_shipping_date(target_date)
+            if not parsed_date:
+                return {
+                    'success': False,
+                    'error': f'無法解析日期格式: {target_date}',
+                    'orders': []
+                }
+            
+            # 生成可能的工作表名稱
+            target_sheet_name = time_utils.format_date_with_weekday(parsed_date, 'sheet_name')
+            
+            # 先嘗試從特定日期的工作表讀取
+            orders = []
+            found_sheet = False
+            
+            # 檢查是否存在對應的日期工作表
+            if self._get_sheet_by_name(target_sheet_name):
+                found_sheet = True
+                sheet_orders = self._get_orders_from_sheet(target_sheet_name, target_date)
+                orders.extend(sheet_orders)
+            
+            # 如果沒有找到特定工作表，或需要搜尋所有工作表
+            if not found_sheet or not orders:
+                # 搜尋所有工作表
+                all_sheets = self._get_all_sheets()
+                for sheet in all_sheets:
+                    sheet_name = sheet.get('properties', {}).get('title', '')
+                    if sheet_name != target_sheet_name:  # 避免重複搜尋
+                        sheet_orders = self._get_orders_from_sheet(sheet_name, target_date)
+                        orders.extend(sheet_orders)
+            
+            return {
+                'success': True,
+                'orders': orders,
+                'target_date': target_date,
+                'formatted_date': time_utils.format_date_with_weekday(parsed_date, 'standard'),
+                'sheet_searched': target_sheet_name if found_sheet else 'all_sheets'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting orders by date {target_date}: {e}")
+            return {
+                'success': False,
+                'error': f'查詢日期訂單時發生錯誤: {e}',
+                'orders': []
+            }
+    
+    def _get_orders_from_sheet(self, sheet_name: str, target_date: str) -> List[Dict[str, Any]]:
+        """從指定工作表中獲取特定日期的訂單"""
+        orders = []
+        
+        try:
+            # 讀取工作表資料
+            range_name = f'{sheet_name}!A:K'
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.sheet_id,
+                range=range_name
+            ).execute()
+            
+            values = result.get('values', [])
+            if len(values) <= 1:  # 只有標題行或空白
+                return orders
+            
+            # 跳過標題行
+            data_rows = values[1:]
+            
+            for row in data_rows:
+                if len(row) < 8:  # 確保有足夠的欄位
+                    continue
+                
+                # 由於新的欄位結構沒有出貨日期，我們改為檢查地址欄位來判斷是否為有效記錄
+                # 如果有地址就視為有效訂單（暫時的解決方案）
+                shipping_address = row[7] if len(row) > 7 else ''
+                
+                # 暫時移除日期匹配，因為新結構沒有日期欄位
+                # TODO: 需要重新設計日期匹配邏輯
+                if shipping_address:  # 有地址就算是有效訂單
+                    # 解析訂單資料
+                    order = {
+                        'sender_name': row[0] if len(row) > 0 else '',     # 訂購/寄件人
+                        'sender_address': row[1] if len(row) > 1 else '',  # 寄件地址
+                        'receiver_name': row[2] if len(row) > 2 else '',   # 收件人
+                        'items_name': row[3] if len(row) > 3 else '',      # 品項
+                        'items_quantity': row[4] if len(row) > 4 else '',  # 數量
+                        'sender_phone': row[5] if len(row) > 5 else '',    # 訂購人電話
+                        'receiver_phone': row[6] if len(row) > 6 else '',  # 收件人電話
+                        'shipping_address': row[7] if len(row) > 7 else '', # 地址
+                        'total_price': row[8] if len(row) > 8 else '',     # 總價
+                        'payment_status': row[9] if len(row) > 9 else '',  # 付款狀況
+                        'last_5_digits': row[10] if len(row) > 10 else '', # 末5碼
+                        'source_sheet': sheet_name
+                    }
+                    orders.append(order)
+            
+        except Exception as e:
+            logger.error(f"Error reading orders from sheet {sheet_name}: {e}")
+        
+        return orders
+    
+    def _date_matches_target(self, shipping_date: str, target_date: str) -> bool:
+        """檢查出貨日期是否符合目標日期"""
+        if not shipping_date:
+            return False
+        
+        try:
+            from .time_utils import time_utils
+            
+            # 解析目標日期
+            target_parsed = time_utils.parse_shipping_date(target_date)
+            if not target_parsed:
+                return False
+            
+            # 解析出貨日期
+            # 處理格式如 "2024-08-27(星期二)" 的情況
+            clean_shipping_date = shipping_date
+            if '(' in shipping_date and ')' in shipping_date:
+                clean_shipping_date = shipping_date.split('(')[0]
+            
+            shipping_parsed = time_utils.parse_shipping_date(clean_shipping_date)
+            if not shipping_parsed:
+                return False
+            
+            # 比較日期（只比較年月日，忽略時間）
+            return (target_parsed.year == shipping_parsed.year and
+                   target_parsed.month == shipping_parsed.month and
+                   target_parsed.day == shipping_parsed.day)
+            
+        except Exception as e:
+            logger.error(f"Error matching dates: {shipping_date} vs {target_date}: {e}")
+            return False

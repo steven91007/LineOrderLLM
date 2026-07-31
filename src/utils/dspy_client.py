@@ -6,6 +6,7 @@ import json
 from typing import Dict, Any, List
 import re
 import mlflow
+from datetime import datetime
 
 # 設定 MLflow 實驗名稱
 mlflow.set_experiment("line_order_experiment")
@@ -77,8 +78,9 @@ class DSPyOrderClient:
         # 執行解析流程
         for attempt in range(self.max_retries):
             try:
-                # 使用統一解析器解析
-                result = self.unified_parser(cleaned_text)
+                # 使用統一解析器解析，傳入當前日期作為參考點
+                current_date = datetime.now()
+                result = self.unified_parser(cleaned_text, reference_date=current_date)
                 parsed_orders = json.loads(result.orders_json)
                 
                 # 確保是陣列格式
