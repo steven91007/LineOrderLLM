@@ -80,25 +80,56 @@ class WeekdayConverter:
         
         date_str = date_str.strip()
         
+        # 優先嘗試解析絕對日期格式
+        absolute_date = cls.parse_absolute_date(date_str)
+        if absolute_date:
+            return absolute_date
+        
         # 檢查是否為星期幾
         for weekday_name in cls.WEEKDAY_MAP.keys():
             if weekday_name in date_str.lower():
                 return cls.get_next_weekday_date(weekday_name, from_date)
         
-        # 如果不是星期幾，嘗試解析為日期
-        import re
+        return None
+    
+    @classmethod
+    def parse_absolute_date(cls, date_str: str) -> Optional[str]:
+        """
+        解析絕對日期格式，返回 MM-DD 格式
         
-        # 嘗試匹配各種日期格式
-        patterns = [
-            (r'(\d{1,2})[/-](\d{1,2})', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),  # MM-DD 或 MM/DD
-            (r'(\d{1,2})月(\d{1,2})', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # X月Y日
-            (r'(\d{1,2})\.(\d{1,2})', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # MM.DD
+        Args:
+            date_str: 日期字串（如：9/20, 9-20, 9月20日等）
+            
+        Returns:
+            標準化的日期字串 (MM-DD 格式) 或 None
+        """
+        if not date_str:
+            return None
+        
+        import re
+        date_str = date_str.strip()
+        
+        # 絕對日期格式匹配
+        absolute_patterns = [
+            (r'(\d{1,2})/(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9/20號 或 9/20
+            (r'(\d{1,2})-(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9-20號 或 9-20
+            (r'(\d{1,2})月(\d{1,2})日?號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"), # 9月20日號
+            (r'(\d{1,2})\.(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),   # 9.20號 或 9.20
+            (r'(\d{2})-(\d{2})', lambda m: f"{m.group(1)}-{m.group(2)}"),                             # 09-20
+            (r'(\d{2})/(\d{2})', lambda m: f"{m.group(1)}-{m.group(2)}"),                             # 09/20
         ]
         
-        for pattern, formatter in patterns:
+        for pattern, formatter in absolute_patterns:
             match = re.search(pattern, date_str)
             if match:
-                return formatter(match)
+                try:
+                    result = formatter(match)
+                    # 驗證月份和日期是否合理
+                    month, day = result.split('-')
+                    if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                        return result
+                except:
+                    continue
         
         return None
     

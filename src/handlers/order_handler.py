@@ -19,6 +19,7 @@ from datetime import datetime
 from ..utils.openai_client import OpenAIClient
 from ..utils.dspy_client import DSPyOrderClient
 from ..utils.google_sheets_client import GoogleSheetsClient
+from ..utils.order_summary import OrderSummaryGenerator
 from .liff_handler import LIFFHandler
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class OrderHandler:
             order_handler=self,
             google_sheets_client=self.sheets_client
         )
+        
+        # 初始化訂單匯總生成器
+        self.summary_generator = OrderSummaryGenerator()
     
     def is_authorized(self, user_id: str) -> bool:
         """檢查用戶是否有權限使用訂單功能"""
@@ -75,6 +79,13 @@ class OrderHandler:
             
             # 顯示訂單處理選單
             self._show_order_menu(event)
+        elif text.strip().startswith('#匯總') or text.strip().startswith('#summary'):
+            # 處理匯總指令
+            if not self.is_authorized(user_id):
+                self._reply_text(event, "抱歉，您沒有權限使用此功能。")
+                return
+            
+            self._handle_summary_request(event, text.strip())
         elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'waiting_order_text':
             # 用戶正在輸入訂單內容
             self._process_order_text(event)
@@ -281,7 +292,7 @@ class OrderHandler:
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"{sender_info}收件人: {order.get('receiver_name', 'N/A')}\n收件人電話: {order.get('receiver_phone', 'N/A')}\n\n商品:\n{items_text.strip()}\n\n地址: {order.get('shipping_address', 'N/A')}",
+                        "text": f"{sender_info}收件人: {order.get('receiver_name', '')}\n收件人電話: {order.get('receiver_phone', '')}\n\n商品:\n{items_text.strip()}\n\n地址: {order.get('shipping_address', '')}",
                         "wrap": True,
                         "size": "sm"
                     }
@@ -313,8 +324,8 @@ class OrderHandler:
         # 如果發貨日期存在，添加到內容中
         if order.get('shipping_date'):
             bubble["body"]["contents"][0]["text"] = bubble["body"]["contents"][0]["text"].replace(
-                f"\n\n地址: {order.get('shipping_address', 'N/A')}",
-                f"\n\n發貨日期: {order['shipping_date']}\n地址: {order.get('shipping_address', 'N/A')}"
+                f"\n\n地址: {order.get('shipping_address', '')}",
+                f"\n\n發貨日期: {order['shipping_date']}\n地址: {order.get('shipping_address', '')}"
             )
         
         return bubble
@@ -440,9 +451,9 @@ class OrderHandler:
             self._reply_text(event, 
                 "🌐 網頁編輯功能需要管理員設定 LIFF 應用程式。\n\n"
                 f"目前訂單 {order_index} 的資訊：\n"
-                f"收件人：{orders[order_index-1].get('receiver_name', 'N/A')}\n"
-                f"電話：{orders[order_index-1].get('receiver_phone', 'N/A')}\n"
-                f"地址：{orders[order_index-1].get('shipping_address', 'N/A')}\n\n"
+                f"收件人：{orders[order_index-1].get('receiver_name', '')}\n"
+                f"電話：{orders[order_index-1].get('receiver_phone', '')}\n"
+                f"地址：{orders[order_index-1].get('shipping_address', '')}\n\n"
                 "請聯絡管理員啟用網頁編輯功能，或使用「確認全部訂單」直接提交。"
             )
             return
@@ -480,7 +491,7 @@ class OrderHandler:
                         "contents": [
                             {
                                 "type": "text",
-                                "text": f"📝 即將編輯：\n收件人：{current_order.get('receiver_name', 'N/A')}\n地址：{current_order.get('shipping_address', 'N/A')}\n\n🌐 將開啟網頁編輯器，您可以：\n• 編輯此訂單的所有資訊\n• 同時修改其他訂單\n• 一次儲存所有變更\n\n點擊下方按鈕開始：",
+                                "text": f"📝 即將編輯：\n收件人：{current_order.get('receiver_name', '')}\n地址：{current_order.get('shipping_address', '')}\n\n🌐 將開啟網頁編輯器，您可以：\n• 編輯此訂單的所有資訊\n• 同時修改其他訂單\n• 一次儲存所有變更\n\n點擊下方按鈕開始：",
                                 "wrap": True,
                                 "size": "sm"
                             }
@@ -627,8 +638,8 @@ class OrderHandler:
             summary += "\n"
         
         # 收件人資訊
-        summary += f"👥 收件人：{order_data.get('receiver_name', 'N/A')}\n"
-        summary += f"📞 收件人電話：{order_data.get('receiver_phone', 'N/A')}\n\n"
+        summary += f"👥 收件人：{order_data.get('receiver_name', '')}\n"
+        summary += f"📞 收件人電話：{order_data.get('receiver_phone', '')}\n\n"
         
         # 商品明細
         if order_data.get('items'):
@@ -642,7 +653,7 @@ class OrderHandler:
             summary += f"📅 預計發貨日：{order_data['shipping_date']}\n"
         
         # 收件地址
-        summary += f"📦 收件地址：{order_data.get('shipping_address', 'N/A')}\n\n"
+        summary += f"📦 收件地址：{order_data.get('shipping_address', '')}\n\n"
         summary += "請確認以上資訊是否正確？"
         
         return summary
@@ -834,12 +845,12 @@ class OrderHandler:
                 
                 success_message += f"\n📋 訂單編號：\n"
                 for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
-                    receiver_name = order.get('receiver_name', 'N/A')
+                    receiver_name = order.get('receiver_name', '')
                     success_message += f"• {order_id} ({receiver_name})\n"
             else:
                 success_message += f"📋 訂單編號：\n"
                 for i, (order_id, order) in enumerate(zip(order_ids, orders), 1):
-                    receiver_name = order.get('receiver_name', 'N/A')
+                    receiver_name = order.get('receiver_name', '')
                     success_message += f"• {order_id} ({receiver_name})\n"
             
             success_message += f"\n🗂️ 所有訂單已自動按出貨日期分組記錄到 Google Sheets。"
@@ -859,3 +870,140 @@ class OrderHandler:
         # 清除會話狀態
         if user_id in self.order_sessions:
             del self.order_sessions[user_id]
+    
+    def _handle_summary_request(self, event: MessageEvent, command_text: str) -> None:
+        """處理匯總請求
+        
+        Args:
+            event: LINE訊息事件
+            command_text: 完整的指令文字（如 "#匯總 8/27"）
+        """
+        try:
+            # 解析日期參數
+            target_date = self._parse_summary_command(command_text)
+            
+            if not target_date:
+                self._reply_text(event, 
+                    "❌ 日期格式錯誤\n\n"
+                    "正確格式範例：\n"
+                    "• #匯總 8/27\n"
+                    "• #匯總 08-27\n"
+                    "• #匯總 2024-08-27\n"
+                    "• #匯總 星期二\n\n"
+                    "請重新輸入正確的日期格式。"
+                )
+                return
+            
+            # 檢查是否有 Google Sheets 客戶端
+            if not self.sheets_client:
+                self._reply_text(event, 
+                    "❌ Google Sheets 功能未啟用\n\n"
+                    "匯總功能需要存取 Google Sheets 資料，\n"
+                    "請聯絡管理員設定相關權限。"
+                )
+                return
+            
+            # 查詢指定日期的訂單（不再先發送處理中訊息，因為 reply_token 只能用一次）
+            query_result = self.sheets_client.get_orders_by_date(target_date)
+            
+            if not query_result['success']:
+                self._reply_text(event, 
+                    f"❌ 查詢失敗\n\n"
+                    f"錯誤訊息：{query_result.get('error', '未知錯誤')}\n\n"
+                    "請稍後再試或聯絡管理員。"
+                )
+                return
+            
+            orders = query_result.get('orders', [])
+            formatted_date = query_result.get('formatted_date', target_date)
+            
+            if not orders:
+                self._reply_text(event, 
+                    f"📋 {formatted_date} 匯總結果\n\n"
+                    f"❌ 該日期沒有找到任何訂單資料。\n\n"
+                    "請確認：\n"
+                    "• 日期格式是否正確\n"
+                    "• 該日期是否有訂單\n"
+                    "• 訂單是否已上傳到 Google Sheets"
+                )
+                return
+            
+            # 生成匯總報告
+            summary_report = self.summary_generator.generate_summary_report(orders, formatted_date)
+            
+            if not summary_report['success']:
+                self._reply_text(event, 
+                    f"❌ 生成匯總報告失敗\n\n"
+                    f"錯誤訊息：{summary_report.get('error', '未知錯誤')}\n\n"
+                    "請稍後再試或聯絡管理員。"
+                )
+                return
+            
+            # 發送匯總報告（加上處理狀態前綴）
+            formatted_report = summary_report.get('formatted_report', '')
+            full_message = f"🔍 已完成 {target_date} 的查詢\n\n{formatted_report}"
+            
+            # 如果報告太長，直接發送原始報告（因為 reply_token 只能用一次）
+            if len(full_message) > 2000:
+                # 太長的話，只發送報告主體
+                self._reply_text(event, formatted_report)
+            else:
+                self._reply_text(event, full_message)
+            
+            logger.info(f"Successfully generated summary for {target_date}: {summary_report['total_orders']} orders, {summary_report['total_items']} items")
+            
+        except Exception as e:
+            logger.error(f"Error handling summary request: {e}")
+            self._reply_text(event, 
+                f"❌ 處理匯總請求時發生錯誤\n\n"
+                f"錯誤訊息：{str(e)}\n\n"
+                "請稍後再試或聯絡管理員。"
+            )
+    
+    def _parse_summary_command(self, command_text: str) -> str:
+        """解析匯總指令中的日期參數
+        
+        Args:
+            command_text: 指令文字（如 "#匯總 8/27"）
+            
+        Returns:
+            str: 解析出的日期字串，失敗則返回 None
+        """
+        import re
+        
+        # 移除指令前綴
+        date_part = re.sub(r'^#(匯總|summary)\s*', '', command_text, flags=re.IGNORECASE).strip()
+        
+        if not date_part:
+            # 沒有提供日期，使用今天
+            from datetime import datetime
+            return datetime.now().strftime('%m-%d')
+        
+        # 簡單驗證日期格式
+        date_patterns = [
+            r'^\d{1,2}/\d{1,2}$',        # 8/27
+            r'^\d{1,2}-\d{1,2}$',        # 8-27
+            r'^\d{4}-\d{1,2}-\d{1,2}$',  # 2024-08-27
+            r'^星期[一二三四五六日天]$',      # 星期二
+            r'^週[一二三四五六日天]$',       # 週二
+        ]
+        
+        for pattern in date_patterns:
+            if re.match(pattern, date_part):
+                return date_part
+        
+        return None
+    
+    def _send_long_message_as_push(self, user_id: str, long_text: str) -> None:
+        """發送長訊息（使用 push message 分段發送）
+        
+        Note: 這個方法需要使用 push message 而不是 reply，
+        因為 reply_token 只能使用一次
+        
+        Args:
+            user_id: 用戶ID
+            long_text: 長文字內容
+        """
+        # 此方法保留但暫不實作，因為需要 push message 權限
+        # 目前的解決方案是截斷訊息以適應單一回覆
+        pass
