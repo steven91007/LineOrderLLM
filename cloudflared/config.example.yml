@@ -1,0 +1,32 @@
+# Cloudflare Tunnel 設定範本
+#
+# 使用方式：
+#   1. 複製成 config.yml
+#   2. 把 <TUNNEL_ID>、<憑證檔路徑>、<你的網域> 換成實際值
+#   3. 放到 cloudflared 的設定目錄：
+#        Windows: %USERPROFILE%\.cloudflared\config.yml
+#        Linux  : ~/.cloudflared/config.yml 或 /etc/cloudflared/config.yml
+#
+# 詳細步驟見 docs/cloudflare-tunnel.md
+
+tunnel: <TUNNEL_ID>
+credentials-file: <憑證檔路徑>/<TUNNEL_ID>.json
+
+# 連線穩定性設定
+# LINE webhook 對回應時間敏感，這幾項可降低斷線與重連造成的逾時
+protocol: quic
+retries: 5
+grace-period: 30s
+
+ingress:
+  # LINE webhook 與 LIFF 頁面都走同一個 Flask 應用
+  # app_with_liff.py 監聽 5001；若改跑 main.py 請改成 5000
+  - hostname: line.<你的網域>
+    service: http://localhost:5001
+    originRequest:
+      # Flask 開發伺服器沒有 keep-alive 調校，縮短閒置連線避免半開連線
+      connectTimeout: 10s
+      noTLSVerify: true
+
+  # 未匹配的請求一律回 404（ingress 規則最後一條必須是 catch-all）
+  - service: http_status:404
