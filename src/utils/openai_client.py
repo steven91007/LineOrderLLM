@@ -1,8 +1,17 @@
-import openai
 from typing import Dict, Any, Optional, List
 import json
 import re
+
+from .langfuse_tracing import init_tracing, observation, update_observation
 from .taiwan_address import TaiwanAddressNormalizer
+
+# 啟用 Langfuse 追蹤；必須在建立 OpenAI client 之前完成 import 才能自動記錄 LLM 呼叫
+init_tracing()
+try:
+    # drop-in replacement：自動記錄 prompt/completion、模型、token 與成本
+    from langfuse.openai import openai
+except ImportError:  # 未安裝 langfuse 時仍可正常運作
+    import openai
 
 
 class OpenAIClient:
