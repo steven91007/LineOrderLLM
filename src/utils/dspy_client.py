@@ -11,6 +11,7 @@ from datetime import datetime
 # 設定 MLflow 實驗名稱
 mlflow.set_experiment("line_order_experiment")
 
+from .langfuse_tracing import init_tracing, observation, update_observation
 from .taiwan_address import TaiwanAddressNormalizer
 
 from .dspy_modules.unified_parser import UnifiedOrderParser
@@ -18,6 +19,9 @@ from .dspy_modules.validators import OrderValidator, JSONValidator
 import mlflow
 mlflow.set_experiment("dspy-order-parser")
 mlflow.dspy.autolog()
+
+# 啟用 Langfuse 追蹤（DSPy 的 LM 呼叫會自動記錄模型、token 與成本）
+init_tracing()
 
 class DSPyOrderClient:
     """使用 DSPy 的訂單解析客戶端"""
@@ -71,61 +75,103 @@ class DSPyOrderClient:
                 'error': '訂單文字不能為空',
                 'data': None
             }
-        
+
         # 預處理文字
         cleaned_text = self._preprocess_text(order_text)
-        
-        # 執行解析流程
-        for attempt in range(self.max_retries):
-            try:
-                # 使用統一解析器解析，傳入當前日期作為參考點
-                current_date = datetime.now()
-                result = self.unified_parser(cleaned_text, reference_date=current_date)
-                parsed_orders = json.loads(result.orders_json)
-                
-                # 確保是陣列格式
-                if not isinstance(parsed_orders, list):
-                    parsed_orders = []
-                
-                # 驗證解析結果
-                validation_result = self._validate_parsed_orders(parsed_orders)
-                
-                if validation_result['is_valid']:
-                    # 標準化地址
-                    normalized_orders = self._normalize_addresses_in_orders(parsed_orders)
-                    
-                    return {
-                        'success': True,
-                        'data': {
-                            'orders': normalized_orders,
-                            'total_orders': len(normalized_orders)
-                        },
-                        'raw_response': json.dumps(normalized_orders, ensure_ascii=False)
-                    }
-                else:
-                    # 驗證失敗，但如果是最後一次嘗試，回傳錯誤
+
+        with observation(
+            'parse-order',
+            input=order_text,
+            metadata={'model': self.model, 'max_retries': self.max_retries}
+        ) as parse_span:
+            # 執行解析流程
+            for attempt in range(self.max_retries):
+                try:
+                    # 使用統一解析器解析，傳入當前日期作為參考點
+                    current_date = datetime.now()
+                    result = self.unified_parser(cleaned_text, reference_date=current_date)
+                    parsed_orders = json.loads(result.orders_json)
+
+                    # 確保是陣列格式
+                    if not isinstance(parsed_orders, list):
+                        parsed_orders = []
+
+                    # 驗證解析結果
+                    with observation('validate-orders', input=parsed_orders) as validate_span:
+                        validation_result = self._validate_parsed_orders(parsed_orders)
+                        update_observation(validate_span, output=validation_result)
+
+                    if validation_result['is_valid']:
+                        # 標準化地址
+                        with observation('normalize-addresses') as normalize_span:
+                            normalized_orders = self._normalize_addresses_in_orders(parsed_orders)
+                            update_observation(
+                                normalize_span,
+                                input=[o.get('shipping_address') for o in parsed_orders if isinstance(o, dict)],
+                                output=[o.get('shipping_address') for o in normalized_orders if isinstance(o, dict)]
+                            )
+
+                        update_observation(
+                            parse_span,
+                            output={'orders': normalized_orders, 'total_orders': len(normalized_orders)},
+                            metadata={'attempts_used': attempt + 1, 'success': True}
+                        )
+                        return {
+                            'success': True,
+                            'data': {
+                                'orders': normalized_orders,
+                                'total_orders': len(normalized_orders)
+                            },
+                            'raw_response': json.dumps(normalized_orders, ensure_ascii=False)
+                        }
+                    else:
+                        # 驗證失敗，但如果是最後一次嘗試，回傳錯誤
+                        if attempt == self.max_retries - 1:
+                            error = f"驗證失敗: {validation_result.get('error_message', '未知錯誤')}"
+                            update_observation(
+                                parse_span,
+                                output={'error': error},
+                                level='ERROR',
+                                status_message=error,
+                                metadata={'attempts_used': attempt + 1, 'success': False}
+                            )
+                            return {
+                                'success': False,
+                                'error': error,
+                                'data': None
+                            }
+
+                except Exception as e:
+                    # 如果是最後一次嘗試，回傳錯誤
                     if attempt == self.max_retries - 1:
+                        error = f'DSPy 解析失敗: {str(e)}'
+                        update_observation(
+                            parse_span,
+                            output={'error': error},
+                            level='ERROR',
+                            status_message=error,
+                            metadata={'attempts_used': attempt + 1, 'success': False}
+                        )
                         return {
                             'success': False,
-                            'error': f"驗證失敗: {validation_result.get('error_message', '未知錯誤')}",
+                            'error': error,
                             'data': None
                         }
-                
-            except Exception as e:
-                # 如果是最後一次嘗試，回傳錯誤
-                if attempt == self.max_retries - 1:
-                    return {
-                        'success': False,
-                        'error': f'DSPy 解析失敗: {str(e)}',
-                        'data': None
-                    }
-        
-        # 所有嘗試都失敗
-        return {
-            'success': False,
-            'error': '多次嘗試後仍然解析失敗，請檢查訂單格式',
-            'data': None
-        }
+
+            # 所有嘗試都失敗
+            error = '多次嘗試後仍然解析失敗，請檢查訂單格式'
+            update_observation(
+                parse_span,
+                output={'error': error},
+                level='ERROR',
+                status_message=error,
+                metadata={'attempts_used': self.max_retries, 'success': False}
+            )
+            return {
+                'success': False,
+                'error': error,
+                'data': None
+            }
     
     def _validate_parsed_orders(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
         """驗證解析後的訂單陣列"""

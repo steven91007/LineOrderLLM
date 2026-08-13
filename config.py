@@ -13,7 +13,7 @@ OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4-0125-preview')
 
 # DSPy 配置
 DSPY_API_KEY = os.getenv('DSPY_API_KEY', OPENAI_API_KEY)  # 預設使用 OpenAI API Key
-DSPY_MODEL = os.getenv('DSPY_MODEL', 'gpt-4-0125-preview')
+DSPY_MODEL = os.getenv('DSPY_MODEL', 'gpt-5.6-luna')
 DSPY_MAX_RETRIES = int(os.getenv('DSPY_MAX_RETRIES', 3))
 
 # 訂單客戶端類型選擇
