@@ -31,6 +31,7 @@ from ..utils.form_sheet_client import (
 )
 from ..utils import langfuse_tracing as tracing
 from ..utils.taiwan_address import TaiwanAddressNormalizer
+from ..utils.text_sanitizer import clean_field, strip_emoji
 from ..utils.time_utils import time_utils
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,13 @@ class ChatLogImporter:
         moment = now or time_utils.get_current_time()
         current_date = time_utils.format_date_with_weekday(moment, 'standard')
 
+        # 先把 emoji 清掉再送進 LLM：省 token，也避免模型直接抄進姓名地址
+        raw_chars = len(chat_log)
+        chat_log = strip_emoji(chat_log)
+        removed = raw_chars - len(chat_log)
+        if removed:
+            logger.info(f'前處理移除 {removed} 個 emoji／零寬字元')
+
         # 第一個 trace：LLM 抽取本身。這段是整批共用的，無法歸屬到單一訂單，
         # 所以獨立成一個 trace，不掛任何 session。
         # DSPy 的兩段呼叫（抽取 + 完整性複查）由 DSPyInstrumentor 自動記錄在這底下。
@@ -122,6 +130,7 @@ class ChatLogImporter:
             'chat-log-parse',
             input_data={'chat_log': chat_log, 'current_date': current_date},
             metadata={'model': self.model, 'chat_log_chars': len(chat_log),
+                      'emoji_chars_removed': removed,
                       'normalize_addresses': self.normalize_addresses},
         ) as root:
             with dspy.context(lm=self.lm):
@@ -380,7 +389,9 @@ class ChatLogImporter:
 
 
 def _text(value: Any) -> str:
-    """把 None / 非字串統一成去頭尾空白的字串"""
-    if value is None:
-        return ''
-    return str(value).strip()
+    """把 None / 非字串統一成去頭尾空白的字串，並清掉 emoji
+
+    模型偶爾會把聊天紀錄裡的 emoji 一起抄進姓名或地址，
+    寫進試算表會變髒資料，也會害重複檢查比對不到，所以每個欄位都清一次。
+    """
+    return clean_field(value)
