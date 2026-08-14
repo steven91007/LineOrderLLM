@@ -96,6 +96,17 @@ class FormSheetClient:
             keys.add(dedup_key(padded[5], padded[6], padded[11]))
         return keys
 
+    def read_all_rows(self) -> List[List[Any]]:
+        """讀出整個分頁（含標題列），每列補齊成 12 欄"""
+        result = self.service.spreadsheets().values().get(
+            spreadsheetId=self.sheet_id,
+            range=self._range(FORM_RANGE),
+            valueRenderOption='FORMATTED_VALUE',
+        ).execute()
+
+        rows = result.get('values', [])
+        return [row + [''] * (len(FORM_COLUMNS) - len(row)) for row in rows]
+
     def append_rows(self, rows: List[List[Any]]) -> Dict[str, Any]:
         """把資料列附加到分頁最後"""
         if not rows:
