@@ -299,35 +299,8 @@ class DSPyTrainingLog(Base):
         return {}
 
 
-class MLflowExperimentLog(Base):
-    """MLflow 實驗追蹤記錄表"""
-    __tablename__ = 'mlflow_experiment_logs'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    experiment_id = Column(String(100), nullable=False, index=True)
-    run_id = Column(String(100), nullable=False, index=True)
-    experiment_name = Column(String(200), nullable=False)
-    raw_input_id = Column(Integer, ForeignKey('raw_order_inputs.id'))
-    parse_result_id = Column(Integer, ForeignKey('ai_parse_results.id'))
-    parameters_json = Column(Text)
-    metrics_json = Column(Text)
-    artifacts_json = Column(Text)
-    status = Column(String(20))  # RUNNING, FINISHED, FAILED
-    start_time = Column(DateTime)
-    end_time = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    def set_parameters(self, parameters: Dict[str, Any]):
-        """設置實驗參數"""
-        self.parameters_json = json.dumps(parameters, ensure_ascii=False)
-    
-    def set_metrics(self, metrics: Dict[str, Any]):
-        """設置實驗指標"""
-        self.metrics_json = json.dumps(metrics, ensure_ascii=False)
-    
-    def set_artifacts(self, artifacts: Dict[str, Any]):
-        """設置實驗產出物"""
-        self.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
+# 已移除 MLflowExperimentLog：追蹤改用 Langfuse，不再落地實驗記錄。
+# 既有資料庫檔案裡的 mlflow_experiment_logs 表不會自動刪除，但已無任何程式讀寫。
 
 
 class SampleQualityEvaluation(Base):

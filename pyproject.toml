@@ -12,8 +12,10 @@ dependencies = [
     "google>=3.0.0",
     "google-api-python-client>=2.177.0",
     "httpx>=0.28.1",
+    # LLM 追蹤（取代原本的 MLflow）
+    "langfuse>=4.14.4",
+    "openinference-instrumentation-dspy>=0.1.39",
     "line-bot-sdk>=3.17.1",
-    "mlflow>=3.1.4",
     "openai>=1.97.1",
     "pydantic-settings>=2.10.1",
     "pytest>=8.4.1",

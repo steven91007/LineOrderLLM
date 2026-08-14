@@ -87,22 +87,9 @@ CREATE TABLE dspy_training_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. MLflow 實驗追蹤記錄表
-CREATE TABLE mlflow_experiment_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    experiment_id TEXT NOT NULL,             -- MLflow 實驗 ID
-    run_id TEXT NOT NULL,                    -- MLflow 運行 ID
-    experiment_name TEXT NOT NULL,           -- 實驗名稱
-    raw_input_id INTEGER REFERENCES raw_order_inputs(id),
-    parse_result_id INTEGER REFERENCES ai_parse_results(id),
-    parameters_json TEXT,                    -- 實驗參數
-    metrics_json TEXT,                       -- 實驗指標
-    artifacts_json TEXT,                     -- 實驗產出物
-    status TEXT,                            -- RUNNING, FINISHED, FAILED
-    start_time DATETIME,
-    end_time DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+-- 6.（已移除）MLflow 實驗追蹤記錄表
+-- 追蹤改用 Langfuse，不再落地實驗記錄。舊資料庫檔案裡若還有
+-- mlflow_experiment_logs 表，已無程式讀寫，可自行 DROP。
 
 -- 7. 樣本品質評估記錄表
 CREATE TABLE sample_quality_evaluations (
@@ -140,7 +127,6 @@ CREATE INDEX idx_confirmed_orders_input_id ON confirmed_orders(raw_input_id);
 CREATE INDEX idx_confirmed_orders_order_id ON confirmed_orders(order_id);
 CREATE INDEX idx_learning_samples_type ON learning_samples(sample_type);
 CREATE INDEX idx_learning_samples_quality ON learning_samples(quality_score);
-CREATE INDEX idx_mlflow_experiment_run ON mlflow_experiment_logs(experiment_id, run_id);
 CREATE INDEX idx_system_perf_operation ON system_performance_logs(operation_type, start_time);
 
 -- 創建視圖方便查詢

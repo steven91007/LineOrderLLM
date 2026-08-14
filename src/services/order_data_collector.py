@@ -12,12 +12,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 import logging
-import mlflow
-import mlflow.dspy
 
 from ..database.models import (
-    db_manager, RawOrderInput, AIParseResult, ConfirmedOrder, 
-    LearningSample, MLflowExperimentLog, SystemPerformanceLog
+    db_manager, RawOrderInput, AIParseResult, ConfirmedOrder,
+    LearningSample, SystemPerformanceLog
 )
 
 logger = logging.getLogger(__name__)
@@ -32,33 +30,20 @@ class OrderDataCollector:
     2. 記錄AI解析結果和性能指標
     3. 記錄最終確認訂單
     4. 生成學習樣本
-    5. 整合MLflow追蹤
-    6. 性能監控
+    5. 性能監控
+
+    追蹤已全面改用 Langfuse（見 src/utils/langfuse_tracing.py），
+    這裡不再自行記錄實驗指標。
     """
-    
-    def __init__(self, enable_mlflow: bool = True):
-        """
-        初始化資料收集器
-        
-        Args:
-            enable_mlflow: 是否啟用MLflow追蹤
-        """
-        self.enable_mlflow = enable_mlflow
-        
+
+    def __init__(self):
+        """初始化資料收集器"""
         # 確保資料庫表已創建
         try:
             db_manager.create_tables()
         except Exception as e:
             logger.error(f"Failed to create database tables: {e}")
-        
-        # 設置MLflow
-        if self.enable_mlflow:
-            try:
-                mlflow.set_experiment("line_order_data_collection")
-            except Exception as e:
-                logger.warning(f"Failed to set MLflow experiment: {e}")
-                self.enable_mlflow = False
-    
+
     def record_raw_input(
         self, 
         user_id: str, 
@@ -148,11 +133,7 @@ class OrderDataCollector:
             
             session.add(parse_result)
             session.commit()
-            
-            # MLflow 追蹤
-            if self.enable_mlflow:
-                self._log_parse_result_to_mlflow(parse_result, session)
-            
+
             logger.info(f"AI parse result recorded with ID: {parse_result.id}")
             return parse_result.id
             
@@ -440,41 +421,6 @@ class OrderDataCollector:
             return None
         finally:
             db_manager.close_session(session)
-    
-    def _log_parse_result_to_mlflow(self, parse_result: AIParseResult, session: Session):
-        """記錄解析結果到MLflow"""
-        try:
-            with mlflow.start_run(nested=True):
-                # 記錄參數
-                mlflow.log_param("parser_type", parse_result.parser_type)
-                mlflow.log_param("parser_version", parse_result.parser_version)
-                
-                # 記錄指標
-                mlflow.log_metric("parsing_success", 1 if parse_result.parsing_success else 0)
-                mlflow.log_metric("parsing_time_ms", parse_result.parsing_time_ms or 0)
-                
-                if parse_result.confidence_score:
-                    mlflow.log_metric("confidence_score", parse_result.confidence_score)
-                
-                # 記錄解析結果數量
-                parsed_orders = parse_result.get_parsed_orders()
-                mlflow.log_metric("parsed_orders_count", len(parsed_orders))
-                
-                # 記錄到資料庫
-                mlflow_log = MLflowExperimentLog(
-                    experiment_id=mlflow.active_run().info.experiment_id,
-                    run_id=mlflow.active_run().info.run_id,
-                    experiment_name="line_order_data_collection",
-                    raw_input_id=parse_result.raw_input_id,
-                    parse_result_id=parse_result.id,
-                    status="FINISHED" if parse_result.parsing_success else "FAILED"
-                )
-                
-                session.add(mlflow_log)
-                session.commit()
-                
-        except Exception as e:
-            logger.warning(f"Failed to log to MLflow: {e}")
     
     def get_learning_samples(
         self, 

@@ -4,8 +4,6 @@
 import dspy
 import json
 from typing import Dict, Any, List
-import mlflow
-mlflow.dspy.autolog()
 
 
 class ItemParserSignature(dspy.Signature):

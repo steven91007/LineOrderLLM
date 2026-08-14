@@ -7,11 +7,7 @@ import json
 import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-import mlflow
 from ..weekday_converter import WeekdayConverter
-# 設定 MLflow 實驗名稱
-mlflow.set_experiment("line_order_experiment")
-mlflow.dspy.autolog()
 
 
 class UnifiedOrderSignature(dspy.Signature):
