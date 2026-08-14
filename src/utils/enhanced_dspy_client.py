@@ -1,6 +1,6 @@
 """
 增強的 DSPy 訂單解析客戶端
-整合資料收集、MLflow追蹤和學習功能
+整合資料收集與學習功能（LLM 追蹤由 Langfuse 負責，見 langfuse_tracing.py）
 """
 import time
 import uuid
@@ -8,8 +8,6 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-import mlflow
-import mlflow.dspy
 
 from .dspy_client import DSPyOrderClient
 from ..services.order_data_collector import order_data_collector
@@ -24,44 +22,33 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
     
     新增功能：
     1. 自動資料收集
-    2. MLflow 實驗追蹤
-    3. 性能監控
-    4. 學習樣本自動生成
-    5. 模型持續改進
+    2. 性能監控
+    3. 學習樣本自動生成
+    4. 模型持續改進
     """
-    
+
     def __init__(
-        self, 
+        self,
         openai_api_key: str,
         enable_data_collection: bool = True,
-        enable_mlflow_tracking: bool = True,
         enable_auto_learning: bool = True
     ):
         """
         初始化增強客戶端
-        
+
         Args:
             openai_api_key: OpenAI API 密鑰
             enable_data_collection: 是否啟用資料收集
-            enable_mlflow_tracking: 是否啟用MLflow追蹤
             enable_auto_learning: 是否啟用自動學習
         """
         super().__init__(openai_api_key)
-        
+
         self.enable_data_collection = enable_data_collection
-        self.enable_mlflow_tracking = enable_mlflow_tracking
         self.enable_auto_learning = enable_auto_learning
-        
+
         self.session_id = str(uuid.uuid4())
-        
-        # 設置MLflow實驗
-        if self.enable_mlflow_tracking:
-            try:
-                mlflow.set_experiment("enhanced_order_parsing")
-            except Exception as e:
-                logger.warning(f"Failed to set MLflow experiment: {e}")
-                self.enable_mlflow_tracking = False
-    
+
+
     def parse_order(
         self, 
         order_text: str, 
@@ -88,14 +75,6 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
         should_collect_data = (collect_data if collect_data is not None 
                              else self.enable_data_collection)
         
-        # 開始MLflow運行
-        if self.enable_mlflow_tracking:
-            mlflow_run = mlflow.start_run(
-                run_name=f"parse_order_{operation_id[:8]}"
-            )
-        else:
-            mlflow_run = None
-        
         try:
             # 記錄原始輸入
             if should_collect_data and user_id:
@@ -104,12 +83,6 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
                     input_text=order_text,
                     session_id=self.session_id
                 )
-            
-            # 記錄MLflow參數
-            if self.enable_mlflow_tracking:
-                mlflow.log_param("order_length", len(order_text))
-                mlflow.log_param("has_user_id", user_id is not None)
-                mlflow.log_param("data_collection_enabled", should_collect_data)
             
             # 調用原始解析方法
             parse_start_time = time.time()
@@ -131,23 +104,6 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
                     error_message=result.get('error') if not result['success'] else None,
                     confidence_score=self._calculate_confidence_score(result)
                 )
-            
-            # 記錄MLflow指標
-            if self.enable_mlflow_tracking:
-                mlflow.log_metric("parsing_time_ms", parsing_time_ms)
-                mlflow.log_metric("success", 1 if result['success'] else 0)
-                
-                if result['success'] and result.get('data', {}).get('orders'):
-                    orders_count = len(result['data']['orders'])
-                    mlflow.log_metric("orders_count", orders_count)
-                    
-                    # 計算平均商品數量
-                    total_items = sum(
-                        len(order.get('items', [])) 
-                        for order in result['data']['orders']
-                    )
-                    mlflow.log_metric("total_items", total_items)
-                    mlflow.log_metric("avg_items_per_order", total_items / orders_count if orders_count > 0 else 0)
             
             # 自動學習觸發（成功解析的情況下）
             if (self.enable_auto_learning and result['success'] and 
@@ -201,11 +157,6 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
                     error_message=error_message
                 )
             
-            # 記錄MLflow指標
-            if self.enable_mlflow_tracking:
-                mlflow.log_metric("success", 0)
-                mlflow.log_param("error_type", type(e).__name__)
-            
             # 記錄系統性能
             if should_collect_data:
                 order_data_collector.record_system_performance(
@@ -229,15 +180,7 @@ class EnhancedDSPyOrderClient(DSPyOrderClient):
                 'operation_id': operation_id,
                 'raw_input_id': raw_input_id
             }
-        
-        finally:
-            # 結束MLflow運行
-            if mlflow_run and self.enable_mlflow_tracking:
-                try:
-                    mlflow.end_run()
-                except:
-                    pass
-    
+
     def record_confirmed_orders(
         self,
         raw_input_id: int,

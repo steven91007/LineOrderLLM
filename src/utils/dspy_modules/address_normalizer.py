@@ -4,8 +4,6 @@
 import dspy
 import json
 from typing import Dict, Any
-import mlflow
-mlflow.dspy.autolog()
 
 
 class AddressNormalizerSignature(dspy.Signature):

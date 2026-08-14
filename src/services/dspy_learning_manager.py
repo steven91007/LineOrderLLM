@@ -8,8 +8,6 @@ import random
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-import mlflow
-import mlflow.dspy
 import dspy
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,13 +37,8 @@ class DSPyLearningManager:
     def __init__(self):
         """初始化學習管理器"""
         self.unified_parser = UnifiedOrderParser()
-        
-        # 設置MLflow實驗
-        try:
-            mlflow.set_experiment("dspy_learning_experiment")
-        except Exception as e:
-            logger.warning(f"Failed to set MLflow experiment: {e}")
-    
+
+
     def collect_training_samples_from_confirmed_orders(
         self, 
         days: int = 30,
@@ -458,85 +451,72 @@ class DSPyLearningManager:
             session.add(training_log)
             session.commit()
             
-            # 開始 MLflow 運行
-            with mlflow.start_run(run_name=f"train_{model_name}_{training_session_id[:8]}"):
-                # 記錄參數
-                mlflow.log_param("model_name", model_name)
-                mlflow.log_param("training_samples", len(train_examples))
-                mlflow.log_param("validation_samples", len(val_examples))
-                
-                # 創建新的解析器實例用於訓練
-                parser = UnifiedOrderParser()
-                
-                # 使用訓練樣本來設置 few-shot examples
-                # 注意：這裡我們更新解析器的 examples
-                parser.examples = train_examples
-                
-                # 評估模型性能
-                val_predictions = []
-                val_targets = []
-                
-                for example in val_examples:
-                    try:
-                        # 使用解析器進行預測
-                        prediction = parser.forward(
-                            order_text=example.order_text
-                        )
-                        
-                        # 比較預測結果和期望結果
-                        predicted_orders = json.loads(prediction.orders_json)
-                        expected_orders = json.loads(example.orders_json)
-                        
-                        # 簡單的準確度計算（基於訂單數量匹配）
-                        val_predictions.append(len(predicted_orders))
-                        val_targets.append(len(expected_orders))
-                        
-                    except Exception as e:
-                        logger.warning(f"Error evaluating example: {e}")
-                        val_predictions.append(0)
-                        val_targets.append(1)
-                
-                # 計算性能指標
-                accuracy = accuracy_score(
-                    [1 if p > 0 else 0 for p in val_targets],
-                    [1 if p > 0 else 0 for p in val_predictions]
-                )
-                
-                precision, recall, f1, _ = precision_recall_fscore_support(
-                    [1 if p > 0 else 0 for p in val_targets],
-                    [1 if p > 0 else 0 for p in val_predictions],
-                    average='weighted',
-                    zero_division=0
-                )
-                
-                # 記錄指標
-                mlflow.log_metric("accuracy", accuracy)
-                mlflow.log_metric("precision", precision)
-                mlflow.log_metric("recall", recall)
-                mlflow.log_metric("f1_score", f1)
-                
-                # 更新訓練記錄
-                training_log.training_end_time = datetime.utcnow()
-                training_log.training_status = 'completed'
-                training_log.accuracy_score = accuracy
-                training_log.f1_score = f1
-                training_log.notes = f"Training completed successfully with {len(train_examples)} examples"
-                
-                # 設置性能指標
-                training_log.set_performance_metrics({
-                    "accuracy": accuracy,
-                    "precision": precision,
-                    "recall": recall,
-                    "f1_score": f1,
-                    "training_duration_minutes": (training_log.training_end_time - training_log.training_start_time).total_seconds() / 60
-                })
-                
-                session.commit()
-                
-                logger.info(f"Model training completed. Session ID: {training_session_id}")
-                logger.info(f"Performance - Accuracy: {accuracy:.3f}, F1: {f1:.3f}")
-                
-                return training_session_id
+            # 創建新的解析器實例用於訓練
+            parser = UnifiedOrderParser()
+
+            # 使用訓練樣本來設置 few-shot examples
+            # 注意：這裡我們更新解析器的 examples
+            parser.examples = train_examples
+
+            # 評估模型性能
+            val_predictions = []
+            val_targets = []
+
+            for example in val_examples:
+                try:
+                    # 使用解析器進行預測
+                    prediction = parser.forward(
+                        order_text=example.order_text
+                    )
+
+                    # 比較預測結果和期望結果
+                    predicted_orders = json.loads(prediction.orders_json)
+                    expected_orders = json.loads(example.orders_json)
+
+                    # 簡單的準確度計算（基於訂單數量匹配）
+                    val_predictions.append(len(predicted_orders))
+                    val_targets.append(len(expected_orders))
+
+                except Exception as e:
+                    logger.warning(f"Error evaluating example: {e}")
+                    val_predictions.append(0)
+                    val_targets.append(1)
+
+            # 計算性能指標
+            accuracy = accuracy_score(
+                [1 if p > 0 else 0 for p in val_targets],
+                [1 if p > 0 else 0 for p in val_predictions]
+            )
+
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                [1 if p > 0 else 0 for p in val_targets],
+                [1 if p > 0 else 0 for p in val_predictions],
+                average='weighted',
+                zero_division=0
+            )
+
+            # 更新訓練記錄（指標存在 DSPyTrainingLog，追蹤改看 Langfuse）
+            training_log.training_end_time = datetime.utcnow()
+            training_log.training_status = 'completed'
+            training_log.accuracy_score = accuracy
+            training_log.f1_score = f1
+            training_log.notes = f"Training completed successfully with {len(train_examples)} examples"
+
+            # 設置性能指標
+            training_log.set_performance_metrics({
+                "accuracy": accuracy,
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "training_duration_minutes": (training_log.training_end_time - training_log.training_start_time).total_seconds() / 60
+            })
+
+            session.commit()
+
+            logger.info(f"Model training completed. Session ID: {training_session_id}")
+            logger.info(f"Performance - Accuracy: {accuracy:.3f}, F1: {f1:.3f}")
+
+            return training_session_id
         
         except Exception as e:
             logger.error(f"Error during model training: {e}")
