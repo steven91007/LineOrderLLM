@@ -5,20 +5,13 @@ import dspy
 import json
 from typing import Dict, Any, List
 import re
-import mlflow
 from datetime import datetime
-
-# 設定 MLflow 實驗名稱
-mlflow.set_experiment("line_order_experiment")
 
 from .langfuse_tracing import init_tracing, observation, update_observation
 from .taiwan_address import TaiwanAddressNormalizer
 
 from .dspy_modules.unified_parser import UnifiedOrderParser
 from .dspy_modules.validators import OrderValidator, JSONValidator
-import mlflow
-mlflow.set_experiment("dspy-order-parser")
-mlflow.dspy.autolog()
 
 # 啟用 Langfuse 追蹤（DSPy 的 LM 呼叫會自動記錄模型、token 與成本）
 init_tracing()

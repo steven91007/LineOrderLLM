@@ -6,7 +6,7 @@
 
 ### 1. 資料收集與追蹤
 - **自動記錄**：記錄所有訂單輸入輸出，建立完整的處理記錄
-- **MLflow 集成**：實驗追蹤和性能監控
+- **Langfuse 追蹤**：LLM 呼叫追蹤與性能監控
 - **性能指標**：解析時間、成功率、信心度等指標統計
 
 ### 2. 學習樣本管理
@@ -59,8 +59,10 @@ python -m src.cli.learning_system_cli init-db
 
 ### 3. 環境變量配置
 ```bash
-# MLflow 追蹤服務器 (可選)
-export MLFLOW_TRACKING_URI=http://localhost:5000
+# Langfuse 追蹤 (可選，未設定時自動停用)
+export LANGFUSE_PUBLIC_KEY=pk-...
+export LANGFUSE_SECRET_KEY=sk-...
+export LANGFUSE_BASE_URL=https://cloud.langfuse.com
 
 # 資料庫連接 (預設使用 SQLite)
 export DATABASE_URL=sqlite:///order_learning_system.db
@@ -76,7 +78,6 @@ from src.utils.enhanced_dspy_client import EnhancedDSPyOrderClient
 client = EnhancedDSPyOrderClient(
     openai_api_key="your-api-key",
     enable_data_collection=True,
-    enable_mlflow_tracking=True, 
     enable_auto_learning=True
 )
 
@@ -149,11 +150,9 @@ python -m src.cli.learning_system_cli stats --days 30
   高品質比例: 78.5%
 ```
 
-### 2. MLflow 追蹤
-訪問 MLflow UI 查看詳細實驗記錄：
-```bash
-mlflow ui
-```
+### 2. Langfuse 追蹤
+到 Langfuse 主控台查看每次 LLM 呼叫的 prompt、completion、token 與延遲。
+設定見 `src/utils/langfuse_tracing.py`；未設金鑰時追蹤靜默停用，不影響主流程。
 
 ### 3. 模型性能評估
 ```python
@@ -243,14 +242,9 @@ performance_log = order_data_collector.record_system_performance(
    python -m src.cli.learning_system_cli init-db
    ```
 
-2. **MLflow 追蹤失敗**
-   ```python
-   # 禁用 MLflow（僅用於測試）
-   client = EnhancedDSPyOrderClient(
-       openai_api_key="your-key",
-       enable_mlflow_tracking=False
-   )
-   ```
+2. **追蹤沒有資料**
+   確認 `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` 已設定。
+   未設定時追蹤會自動停用（log 會有一行提示），解析本身仍正常運作。
 
 3. **樣本品質過低**
    ```bash
@@ -325,7 +319,7 @@ batch_results = sample_quality_evaluator.batch_evaluate_samples(
 
 1. **定期維護**：每週運行一次完整學習管道
 2. **品質監控**：保持樣本平均品質在 0.8 以上
-3. **性能追蹤**：使用 MLflow 追蹤所有實驗
+3. **性能追蹤**：使用 Langfuse 追蹤所有 LLM 呼叫
 4. **數據備份**：定期備份資料庫和訓練好的模型
 5. **版本管理**：為每次重要的模型更新建立版本標記
 

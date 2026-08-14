@@ -14,12 +14,8 @@ import json
 import logging
 import re
 from typing import Any, Dict, List
-import mlflow
 
 from ..form_options import describe_options
-
-mlflow.set_experiment("line_order_experiment")
-mlflow.dspy.autolog()
 
 logger = logging.getLogger(__name__)
 
