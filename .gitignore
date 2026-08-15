@@ -22,3 +22,9 @@ aesthetic-rush-323802-7f5591bc4a1c.json
 *.xlsx
 *.xls
 *.csv
+
+# 參考用的外部 demo 檔（含他人的供應商名稱、料號與信件內容，不得進版控）
+agentdemo_*.html
+
+# Claude Code 本地設定
+.claude/
