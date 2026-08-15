@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 """
-把訂單總表依「欲配送日期」拆成一天一個分頁
+把訂單總表依「欲配送日期」拆成一天一個分頁，並產出每日出貨統計
 
 同一個試算表檔案裡，每個配送日期會有一個以日期命名的分頁（例如 2026-08-16），
 沒填日期或日期看不懂的訂單會集中在「未指定日期」分頁。
+
+每個分頁的訂單列下方會附上該日的備貨清單，形如：
+    20A 家庭號 一箱*2個地址
+    20A 禮盒 一盒*2個地址
+    18A 禮盒 一盒*1個地址
 
 用法：
     # 只預覽會怎麼分，不動試算表（預設）
@@ -61,17 +66,43 @@ def main():
         print(result.get('message', '沒有可分類的訂單'))
         return 0
 
+    summaries = result.get('summaries') or {}
     print(f'\n共 {result["total_rows"]} 筆訂單，分成 {len(groups)} 個分頁：')
     for sheet_name, rows in groups.items():
         mark = '⚠️ ' if sheet_name == UNDATED_SHEET_NAME else '  '
-        print(f'{mark}{sheet_name}　{len(rows)} 筆')
+        print(f'\n{mark}{sheet_name}　{len(rows)} 筆')
+        _print_summary(summaries.get(sheet_name))
+
+    stale = result.get('stale_sheets') or []
+    if stale:
+        print(f'\n🧹 這些日期分頁已無對應訂單（訂單可能改了配送日），內容會被清空：')
+        for sheet_name in stale:
+            print(f'   {sheet_name}')
 
     if not args.write:
         print('\n這是預覽，沒有寫入任何資料。確認無誤後加上 --write 就會建立／更新這些分頁。')
         return 0
 
-    print(f'\n✅ 已寫入 {len(result["written_sheets"])} 個分頁')
+    print(f'\n✅ 已寫入 {len(result["written_sheets"])} 個分頁'
+          + (f'，清空 {len(stale)} 個' if stale else ''))
     return 0
+
+
+def _print_summary(summary):
+    """印出單一日期的出貨統計（備貨清單）"""
+    if not summary:
+        return
+
+    for line in summary['lines']:
+        print(f'      {line.text}')
+
+    if summary['unparsed']:
+        for raw in sorted(set(summary['unparsed'])):
+            print(f'      ⚠️ 品項無法辨識，未列入統計：{raw}')
+
+    totals = '／'.join(f'{count} {unit}' for unit, count in summary['totals'].items())
+    if totals:
+        print(f'      ── 合計 {totals}')
 
 
 def _check_config():

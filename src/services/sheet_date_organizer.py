@@ -4,6 +4,9 @@
 同一個試算表檔案裡，每個配送日期開一個以日期命名的分頁（例如 `2026-08-16`），
 內容是總表中該日期的所有訂單列，欄位順序與總表完全一致。
 
+每個日期分頁的訂單列下方，會再附上該日的出貨統計（備貨清單），
+形如 `20A 禮盒 一盒*2個地址`，統計邏輯見 shipping_summary.py。
+
 設計上刻意做成「每次執行都重建日期分頁」：
 先清空該分頁再整批寫入，所以重複執行不會產生重複資料，
 總表改過之後再跑一次就會同步。也因此**不要手動編輯日期分頁**，
@@ -20,6 +23,7 @@ from googleapiclient.errors import HttpError
 
 from ..utils.form_options import FORM_COLUMNS, FORM_RANGE
 from ..utils.form_sheet_client import FormSheetClient
+from .shipping_summary import summarize, summary_rows
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +78,29 @@ class SheetDateOrganizer:
 
         header = rows[0]
         groups = self._group_by_date(rows[1:])
+        summaries = OrderedDict(
+            (sheet_name, summarize(data_rows))
+            for sheet_name, data_rows in groups.items()
+        )
+
+        try:
+            existing = self._existing_sheet_names()
+        except HttpError as error:
+            return {'success': False, 'error': f'讀取分頁清單失敗：{error}'}
+
+        # 訂單改了配送日期之後，原本那天的分頁會變成沒有來源的殘留資料。
+        # 日期分頁是總表的投影，留著就是錯的，所以要一併清空。
+        stale = [name for name in existing
+                 if is_date_sheet(name) and name not in groups]
 
         result = {
             'success': True,
             'source_sheet': self.source_sheet,
             'groups': groups,
+            'summaries': summaries,
             'total_rows': sum(len(v) for v in groups.values()),
             'written_sheets': [],
+            'stale_sheets': stale,
             'dry_run': dry_run,
         }
 
@@ -88,11 +108,17 @@ class SheetDateOrganizer:
             return result
 
         try:
-            existing = self._existing_sheet_names()
+            for sheet_name in stale:
+                self._clear_sheet(sheet_name)
+                logger.info(f'清空已無訂單的日期分頁：{sheet_name}')
+
             for sheet_name, data_rows in groups.items():
                 if sheet_name not in existing:
                     self._create_sheet(sheet_name)
-                self._replace_sheet_content(sheet_name, header, data_rows)
+                self._replace_sheet_content(
+                    sheet_name, header, data_rows,
+                    summary_rows(summaries[sheet_name], sheet_name),
+                )
                 result['written_sheets'].append(sheet_name)
         except HttpError as error:
             result['success'] = False
@@ -157,14 +183,19 @@ class SheetDateOrganizer:
         ).execute()
         logger.info(f'建立日期分頁：{sheet_name}')
 
-    def _replace_sheet_content(self, sheet_name: str, header: List[Any],
-                               data_rows: List[List[Any]]) -> None:
-        """清空分頁後重新寫入標題列與訂單列"""
-        target = f"'{sheet_name}'!{FORM_RANGE}"
-
+    def _clear_sheet(self, sheet_name: str) -> None:
+        """清空分頁內容（統計區塊只佔 A 欄，清除範圍仍用 A:L 蓋掉整片舊內容）"""
         self.service.spreadsheets().values().clear(
-            spreadsheetId=self.sheet_id, range=target, body={},
+            spreadsheetId=self.sheet_id,
+            range=f"'{sheet_name}'!{FORM_RANGE}",
+            body={},
         ).execute()
+
+    def _replace_sheet_content(self, sheet_name: str, header: List[Any],
+                               data_rows: List[List[Any]],
+                               extra_rows: List[List[Any]] = None) -> None:
+        """清空分頁後重新寫入標題列、訂單列，以及附在下方的統計區塊"""
+        self._clear_sheet(sheet_name)
 
         # 用 RAW 而不是 USER_ENTERED：總表讀出來的已經是顯示值，
         # 交給 Sheets 重新解讀會把電話 0937... 當成數字吃掉開頭的 0。
@@ -172,7 +203,8 @@ class SheetDateOrganizer:
             spreadsheetId=self.sheet_id,
             range=f"'{sheet_name}'!A1",
             valueInputOption='RAW',
-            body={'values': [header] + data_rows, 'majorDimension': 'ROWS'},
+            body={'values': [header] + data_rows + (extra_rows or []),
+                  'majorDimension': 'ROWS'},
         ).execute()
 
 
