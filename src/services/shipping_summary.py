@@ -3,9 +3,9 @@
 
 輸出形如：
 
-    20A 家庭號 一箱*2個地址
-    20A 禮盒 一盒*2個地址
-    18A 禮盒 一盒*1個地址
+    20A 家庭號 1箱*2個地址
+    20A 禮盒 1盒*2個地址
+    18A 禮盒 1盒*1個地址
 
 「個地址」數的是**訂單列數**，不是不重複地址數——一列就是一次出貨，
 同一個地址下兩張單要包兩份，合併計算會少備貨。
@@ -13,7 +13,7 @@
 統計的來源是試算表 I／J 欄的下拉選項字串（例如 `20A 一盒 $1,150`、
 `18A 1箱 $1,850`），而不是自由文字，所以可以穩定地用規則解析。
 禮盒的數量用中文（一盒、兩盒），家庭號用阿拉伯數字（1箱、2箱），
-兩者不一致是表單本身的寫法，這裡讀進來之後統一用中文顯示。
+兩者不一致是表單本身的寫法，這裡讀進來之後統一轉成阿拉伯數字顯示。
 """
 
 import re
@@ -35,12 +35,6 @@ _CHINESE_TO_INT = {
     '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
 }
 
-# 顯示用：2 一律寫「兩」，和表單禮盒選項的寫法一致
-_INT_TO_CHINESE = {
-    1: '一', 2: '兩', 3: '三', 4: '四', 5: '五',
-    6: '六', 7: '七', 8: '八', 9: '九', 10: '十',
-}
-
 
 class SummaryLine(NamedTuple):
     """一種「規格＋類別＋單筆數量」的統計結果"""
@@ -53,9 +47,8 @@ class SummaryLine(NamedTuple):
 
     @property
     def text(self) -> str:
-        """`20A 家庭號 一箱*2個地址`"""
-        qty = _INT_TO_CHINESE.get(self.quantity, str(self.quantity))
-        return f'{self.spec} {self.category} {qty}{self.unit}*{self.addresses}個地址'
+        """`20A 家庭號 1箱*2個地址`"""
+        return f'{self.spec} {self.category} {self.quantity}{self.unit}*{self.addresses}個地址'
 
 
 def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
