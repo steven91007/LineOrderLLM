@@ -7,6 +7,8 @@
 每個日期分頁的訂單列下方，會再附上該日的出貨統計（備貨清單），
 形如 `20A 禮盒 1盒*2個地址`，統計邏輯見 shipping_summary.py。
 
+訂單列會套上隔行底色（偶數列淺橘），方便長輩橫著看不會串行。
+
 設計上刻意做成「每次執行都重建日期分頁」：
 先清空該分頁再整批寫入，所以重複執行不會產生重複資料，
 總表改過之後再跑一次就會同步。也因此**不要手動編輯日期分頁**，
@@ -38,6 +40,12 @@ DATE_SHEET_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 # 表單日期欄可能出現的寫法
 _DATE_FORMATS = ('%Y/%m/%d', '%Y-%m-%d', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M:%S')
+
+# 訂單列的隔行底色：偶數列（第 2、4、6… 列）淺橘、奇數列白底。
+# 長輩看整排文字容易跳行，隔行上色是為了讓一列資料橫著看不會串行，
+# 顏色刻意選飽和度低的淺橘（#FFE0B2），列印或投影都還看得出黑字。
+BAND_COLOR = {'red': 1.0, 'green': 0.878, 'blue': 0.698}
+BAND_ALT_COLOR = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
 
 
 class SheetDateOrganizer:
@@ -84,7 +92,7 @@ class SheetDateOrganizer:
         )
 
         try:
-            existing = self._existing_sheet_names()
+            existing = self._existing_sheets()
         except HttpError as error:
             return {'success': False, 'error': f'讀取分頁清單失敗：{error}'}
 
@@ -110,15 +118,16 @@ class SheetDateOrganizer:
         try:
             for sheet_name in stale:
                 self._clear_sheet(sheet_name)
+                self._apply_banding(existing[sheet_name], 0)
                 logger.info(f'清空已無訂單的日期分頁：{sheet_name}')
 
             for sheet_name, data_rows in groups.items():
-                if sheet_name not in existing:
-                    self._create_sheet(sheet_name)
+                meta = existing.get(sheet_name) or self._create_sheet(sheet_name)
                 self._replace_sheet_content(
                     sheet_name, header, data_rows,
                     summary_rows(summaries[sheet_name], sheet_name),
                 )
+                self._apply_banding(meta, len(data_rows))
                 result['written_sheets'].append(sheet_name)
         except HttpError as error:
             result['success'] = False
@@ -146,12 +155,28 @@ class SheetDateOrganizer:
             ordered[UNDATED_SHEET_NAME] = groups[UNDATED_SHEET_NAME]
         return ordered
 
-    def _existing_sheet_names(self) -> List[str]:
-        spreadsheet = self.service.spreadsheets().get(spreadsheetId=self.sheet_id).execute()
-        return [s['properties']['title'] for s in spreadsheet.get('sheets', [])]
+    def _existing_sheets(self) -> "OrderedDict[str, Dict[str, Any]]":
+        """分頁名稱 → {'id': 分頁 gid, 'bandings': 既有隔行底色的 id 清單}
 
-    def _create_sheet(self, sheet_name: str) -> None:
-        """新增分頁並凍結標題列"""
+        隔行底色（banding）要能重新套用，就得知道舊的 banding id 才能先刪掉，
+        所以這裡順手把 bandedRanges 一起讀回來，避免之後再多打一次 API。
+        """
+        spreadsheet = self.service.spreadsheets().get(
+            spreadsheetId=self.sheet_id,
+            fields='sheets(properties(sheetId,title),bandedRanges(bandedRangeId))',
+        ).execute()
+
+        sheets = OrderedDict()
+        for sheet in spreadsheet.get('sheets', []):
+            props = sheet['properties']
+            sheets[props['title']] = {
+                'id': props['sheetId'],
+                'bandings': [b['bandedRangeId'] for b in sheet.get('bandedRanges', [])],
+            }
+        return sheets
+
+    def _create_sheet(self, sheet_name: str) -> Dict[str, Any]:
+        """新增分頁並凍結標題列，回傳 {'id', 'bandings'}"""
         response = self.service.spreadsheets().batchUpdate(
             spreadsheetId=self.sheet_id,
             body={'requests': [{
@@ -182,6 +207,51 @@ class SheetDateOrganizer:
             }]},
         ).execute()
         logger.info(f'建立日期分頁：{sheet_name}')
+        return {'id': new_sheet_id, 'bandings': []}
+
+    def _apply_banding(self, meta: Dict[str, Any], data_row_count: int) -> None:
+        """重設訂單列的隔行底色（偶數列淺橘）
+
+        分頁每次都重建、列數會變，所以先刪掉舊的 banding 再依這次的列數重建，
+        免得舊範圍蓋到下方的備貨清單、或訂單變少後留下一段空的橘底。
+
+        Args:
+            meta: `_existing_sheets` / `_create_sheet` 給的 {'id', 'bandings'}
+            data_row_count: 訂單列數（不含標題列），0 表示只刪不加
+        """
+        requests = [{'deleteBanding': {'bandedRangeId': banding_id}}
+                    for banding_id in meta.get('bandings', [])]
+
+        if data_row_count > 0:
+            # 範圍從第 2 列（標題列之後）開始，所以第一條色帶就落在試算表的第 2 列，
+            # 之後每隔一列一次 → 淺橘剛好都在偶數列。
+            requests.append({'addBanding': {'bandedRange': {
+                'range': {
+                    'sheetId': meta['id'],
+                    'startRowIndex': 1,
+                    'endRowIndex': 1 + data_row_count,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': len(FORM_COLUMNS),
+                },
+                'rowProperties': {
+                    'firstBandColor': BAND_COLOR,
+                    'secondBandColor': BAND_ALT_COLOR,
+                },
+            }}})
+
+        if not requests:
+            return
+
+        response = self.service.spreadsheets().batchUpdate(
+            spreadsheetId=self.sheet_id,
+            body={'requests': requests},
+        ).execute()
+
+        # 同一次執行若再次寫入同一分頁，要刪的是剛剛新增的這條
+        meta['bandings'] = [
+            reply['addBanding']['bandedRange']['bandedRangeId']
+            for reply in response.get('replies', []) if 'addBanding' in reply
+        ]
 
     def _clear_sheet(self, sheet_name: str) -> None:
         """清空分頁內容（統計區塊只佔 A 欄，清除範圍仍用 A:L 蓋掉整片舊內容）"""
