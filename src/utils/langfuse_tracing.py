@@ -79,22 +79,36 @@ def trace(name: str, session_id: Optional[str] = None,
         yield _NullSpan()
         return
 
-    client = get_client()
-    try:
-        with client.start_as_current_observation(as_type='span', name=name) as span:
-            if input_data is not None:
-                span.update(input=input_data)
-            if metadata:
-                span.update(metadata=metadata)
+    # 只有「建立 span」這段可以失敗就算了；yield 之後的錯誤是呼叫端的業務錯誤，
+    # 必須原樣往外拋。
+    #
+    # 之前這裡是把整個 with（含 yield）包在 try/except 裡，呼叫端 body 一拋例外，
+    # 就會被這裡接住然後再 yield 一次 —— contextmanager 不允許 throw 之後再 yield，
+    # Python 會轉成 RuntimeError: generator didn't stop after throw()，
+    # 真正的錯誤與 traceback 全部消失，非常難查。
+    from contextlib import ExitStack
 
-            if session_id:
-                with propagate_attributes(session_id=session_id[:200]):
-                    yield span
-            else:
-                yield span
+    stack = ExitStack()
+    try:
+        client = get_client()
+        span = stack.enter_context(
+            client.start_as_current_observation(as_type='span', name=name)
+        )
+        if input_data is not None:
+            span.update(input=input_data)
+        if metadata:
+            span.update(metadata=metadata)
+        if session_id:
+            stack.enter_context(propagate_attributes(session_id=session_id[:200]))
     except Exception as error:
         logger.warning(f'Langfuse span「{name}」建立失敗，略過追蹤：{error}')
+        stack.close()
         yield _NullSpan()
+        return
+
+    # ExitStack 會把 body 的例外正確傳給 span 收尾，同時讓例外繼續往外拋
+    with stack:
+        yield span
 
 
 def score(name: str, value: float, comment: Optional[str] = None):

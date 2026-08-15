@@ -249,11 +249,20 @@ class ChatLogParser(dspy.Module):
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            # 退而求其次：抓出第一個 [...] 區段
-            match = re.search(r'\[.*\]', text, re.DOTALL)
-            if not match:
+            # 模型有時會在 JSON 前後多寫幾句話。從第一個 [ 或 { 開始用 raw_decode，
+            # 只取第一個完整的 JSON 值，後面多出來的內容忽略掉。
+            #
+            # 原本這裡用貪婪的 \[.*\] 比對，只要輸出裡還有第二個 ]（多寫一段說明、
+            # 或吐出兩個陣列），就會把中間所有東西一起抓進來，然後整批解析失敗。
+            starts = [i for i in (text.find('['), text.find('{')) if i >= 0]
+            if not starts:
                 raise ValueError(f'無法從 LLM 輸出解析出訂單 JSON：{raw[:200]}')
-            parsed = json.loads(match.group(0))
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(text[min(starts):])
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f'無法從 LLM 輸出解析出訂單 JSON（{error}）：{raw[:200]}'
+                ) from error
 
         if isinstance(parsed, dict):
             parsed = [parsed]
