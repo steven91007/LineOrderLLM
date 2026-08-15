@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LINE Order Extraction Agent</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1f2430; --mut: #6b7280;
+  --line: #e5e7eb; --s1: #2a78d6; --s2: #eb6834; --good: #12805c;
+  --bad: #b42318; --accentbg: #eef4fd; --chip: #f1f3f6;
+  --na: #9ca3af; --warn: #96690f; --warnbg: #fdf5e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #131417; --card: #1c1e22; --ink: #f2f3f5; --mut: #9aa1ab;
+    --line: #33363c; --s1: #3987e5; --s2: #d95926; --good: #2fa57e;
+    --bad: #e66767; --accentbg: #1d2836; --chip: #24262b;
+    --na: #6b7280; --warn: #d8a75a; --warnbg: #2b2418;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131417; --card: #1c1e22; --ink: #f2f3f5; --mut: #9aa1ab;
+  --line: #33363c; --s1: #3987e5; --s2: #d95926; --good: #2fa57e;
+  --bad: #e66767; --accentbg: #1d2836; --chip: #24262b;
+  --na: #6b7280; --warn: #d8a75a; --warnbg: #2b2418;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.65 "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 20; background: var(--card);
+  border-bottom: 1px solid var(--line); padding: 10px 18px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+nav { display: flex; gap: 4px; }
+nav button { border: 1px solid var(--line); background: var(--card);
+  color: var(--ink); border-radius: 999px; padding: 5px 14px;
+  cursor: pointer; font-size: 13px; }
+nav button.on { background: var(--s1); border-color: var(--s1); color: #fff; }
+nav button:focus-visible, .controls button:focus-visible,
+.chead:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.mask-toggle { margin-left: auto; font-size: 12.5px; color: var(--mut);
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  user-select: none; }
+main { max-width: 1120px; margin: 0 auto; padding: 18px; }
+section.page { display: none; }
+section.page.on { display: block; }
+.card { background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+h3 { font-size: 14px; margin: 0 0 8px; }
+.mut { color: var(--mut); }
+.small { font-size: 12.5px; }
+.lead { font-size: 15px; }
+p { margin: 0 0 10px; }
+p:last-child { margin-bottom: 0; }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px; background: var(--chip); padding: 1px 5px;
+  border-radius: 4px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit,
+  minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; padding: 12px 14px; }
+.tile .v { font-size: 22px; font-weight: 700; color: var(--s1);
+  line-height: 1.25; }
+.tile .l { font-size: 12.5px; color: var(--mut); }
+
+.flow { display: flex; gap: 0; align-items: stretch; overflow-x: auto;
+  padding: 6px 0; }
+.fnode { min-width: 118px; border: 1.5px solid var(--line);
+  background: var(--card); border-radius: 10px; padding: 8px 10px;
+  text-align: center; flex: 1; }
+.fnode b { display: block; font-size: 13px; }
+.fnode span { font-size: 11.5px; color: var(--mut); }
+.farrow { align-self: center; padding: 0 6px; color: var(--mut); }
+.fnode.hl { border-color: var(--s1); background: var(--accentbg); }
+.fnode.dash { border-style: dashed; border-color: var(--na); }
+.fnode.dash b { color: var(--mut); }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px;
+  color: var(--mut); margin-top: 8px; }
+.legend i { font-style: normal; display: inline-flex; align-items: center;
+  gap: 7px; }
+.lsw { width: 22px; border-top: 1.5px solid var(--ink); }
+.lsw.d { border-top-style: dashed; border-color: var(--na); }
+
+.codecard { border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px; overflow: hidden; }
+.chead { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  cursor: pointer; background: var(--chip); flex-wrap: wrap; }
+.cstage { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: #fff; background: var(--s1); border-radius: 999px;
+  padding: 2px 9px; white-space: nowrap; }
+.ctitle { font-size: 13.5px; font-weight: 600; }
+.caret { margin-left: auto; font-size: 12px; color: var(--mut);
+  white-space: nowrap; }
+.cbody { display: none; padding: 12px; }
+.codecard.open .cbody { display: block; }
+.csay { font-size: 13px; color: var(--ink); background: var(--accentbg);
+  border-left: 3px solid var(--s1); border-radius: 0 6px 6px 0;
+  padding: 9px 12px; margin-bottom: 10px; }
+.cpath { font-size: 11.5px; color: var(--mut); margin-bottom: 8px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  overflow-wrap: anywhere; }
+pre.code { margin: 0; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px; line-height: 1.6; }
+.tok-k { color: var(--s1); }
+.tok-s { color: var(--s2); }
+.tok-c { color: var(--mut); font-style: italic; }
+
+.controls { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.controls button { border: 1px solid var(--line); background: var(--card);
+  color: var(--ink); border-radius: 8px; padding: 5px 12px; cursor: pointer;
+  font-size: 13px; }
+.controls button.primary { background: var(--s1); border-color: var(--s1);
+  color: #fff; }
+.controls button:disabled { opacity: .45; cursor: default; }
+
+.dots { display: flex; gap: 5px; flex-wrap: wrap; margin: 8px 0; }
+.dot { width: 30px; height: 30px; border-radius: 8px;
+  border: 1.5px solid var(--line); background: var(--card); cursor: pointer;
+  font-size: 11px; color: var(--mut); display: flex; align-items: center;
+  justify-content: center; }
+.dot.on { border-color: var(--s1); background: var(--accentbg);
+  color: var(--s1); font-weight: 700; }
+.dot.done { border-color: var(--good); color: var(--good); }
+
+.io-row { display: flex; gap: 9px; align-items: flex-start;
+  margin-bottom: 7px; }
+.io-tag { font-size: 10.5px; letter-spacing: .05em; border-radius: 4px;
+  padding: 2px 6px; white-space: nowrap; margin-top: 2px; }
+.io-in { background: var(--chip); color: var(--mut); }
+.io-out { background: var(--accentbg); color: var(--s1); }
+.io-val { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.io-mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px; }
+.pii { background: var(--chip); border-radius: 3px; }
+.masked .pii { color: transparent; background: var(--na); border-radius: 3px; }
+
+.badge { font-size: 11.5px; border-radius: 999px; padding: 2px 9px;
+  border: 1px solid var(--line); }
+.b-ready { color: var(--good); border-color: var(--good); }
+.b-review { color: var(--warn); border-color: var(--warn); }
+.b-duplicate { color: var(--mut); }
+
+.narr { background: var(--warnbg); border-left: 3px solid var(--warn);
+  border-radius: 0 6px 6px 0; padding: 10px 12px; font-size: 13px;
+  margin-top: 10px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+
+table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.t th, table.t td { text-align: left; padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t th { font-size: 11.5px; letter-spacing: .05em; color: var(--mut);
+  text-transform: uppercase; font-weight: 600; }
+.rowout { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; overflow-x: auto;
+  white-space: pre; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>LINE Order Extraction Agent</h1>
+  <nav id="nav"></nav>
+  <label class="mask-toggle"><input type="checkbox" id="zh">
+    Show 中文 original</label>
+  <label class="mask-toggle" style="margin-left:0"><input type="checkbox" id="mask">
+    Mask sensitive data</label>
+</header>
+<main id="main"></main>
+<script>
+const DATA = {"built_at": "2026-08-15", "model": "gpt-5.6-luna", "cases": [{"id": "single", "title": "One order, scattered across messages", "note": "Emoji throughout, and the details arrive in five separate messages.", "raw_log": "2026/08/13 09:02\t小美😊\t老闆你好🙏 我要訂梨子\n2026/08/13 09:03\t小美😊\t寄件人 林小美 0912345678\n2026/08/13 09:04\t小美😊\t1️⃣ 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓🏠\n2026/08/13 09:05\t小美😊\t20A 一盒就好❤️ 麻煩8/19到貨🚚\n2026/08/13 09:30\t小美😊\t匯款好了 末五碼 12345✅\n", "total_ms": 3960, "events": [{"stage": "sanitize", "inp": "2026/08/13 09:02\t小美😊\t老闆你好🙏 我要訂梨子\n2026/08/13 09:03\t小美😊\t寄件人 林小美 0912345678\n2026/08/13 09:04\t小美😊\t1️⃣ 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓🏠\n2026/08/13 09:05\t小美😊\t20A 一盒就好❤️ 麻煩8/19到貨🚚\n2026/08/13 09:30\t小美😊\t匯款好了 末五碼 12345✅\n", "out": "2026/08/13 09:02\t小美\t老闆你好 我要訂梨子\n2026/08/13 09:03\t小美\t寄件人 林小美 0912345678\n2026/08/13 09:04\t小美\t1 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓\n2026/08/13 09:05\t小美\t20A 一盒就好 麻煩8/19到貨\n2026/08/13 09:30\t小美\t匯款好了 末五碼 12345\n", "removed": 13, "inp_en": "2026/08/13 09:02\tXiaomei😊\tHi boss🙏 I'd like to order some pears\n2026/08/13 09:03\tXiaomei😊\tSender is Lin Xiaomei 0912345678\n2026/08/13 09:04\tXiaomei😊\t1️⃣ Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei🏠\n2026/08/13 09:05\tXiaomei😊\tJust one box of 20A❤️ please deliver on 8/19🚚\n2026/08/13 09:30\tXiaomei😊\tTransfer done, last five digits 12345✅\n", "out_en": "2026/08/13 09:02\tXiaomei\tHi boss I'd like to order some pears\n2026/08/13 09:03\tXiaomei\tSender is Lin Xiaomei 0912345678\n2026/08/13 09:04\tXiaomei\t1 Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei\n2026/08/13 09:05\tXiaomei\tJust one box of 20A please deliver on 8/19\n2026/08/13 09:30\tXiaomei\tTransfer done, last five digits 12345\n"}, {"stage": "extract", "ms": 4, "inp": "chat log, 203 chars · today = 2026-08-15(星期六)", "out": "[{\"orderer\":\"小美\",\"sender_name\":\"林小美\",\"sender_phone\":\"0912345678\",\"sender_address\":\"\",\"receiver_name\":\"王大同\",\"receiver_phone\":\"0922333444\",\"receiver_address\":\"台北市中山區南京東路二段100號5樓\",\"giftbox_spec\":\"20A\",\"giftbox_boxes\":1,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"12345\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"老闆你好 我要訂梨子 / 寄件人 林小美 0912345678 / 1 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓 / 20A 一盒就好 麻煩8/19到貨 / 匯款好了 末五碼 12345\",\"issues\":[\"未提供寄件人地址\"]}]", "inp_en": "chat log, 203 chars · today = 2026-08-15(Saturday)", "out_en": "[{\"orderer\":\"Xiaomei\",\"sender_name\":\"Lin Xiaomei\",\"sender_phone\":\"0912345678\",\"sender_address\":\"\",\"receiver_name\":\"Wang Datong\",\"receiver_phone\":\"0922333444\",\"receiver_address\":\"5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei City\",\"giftbox_spec\":\"20A\",\"giftbox_boxes\":1,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"12345\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"Hi boss I'd like to order some pears / Sender is Lin Xiaomei 0912345678 / 1 Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei / Just one box of 20A please deliver on 8/19 / Transfer done, last five digits 12345\",\"issues\":[\"sender address not provided\"]}]"}, {"stage": "recall", "ms": 2, "inp": "- 王大同／20A 1", "out": "[]", "inp_en": "- Wang Datong／20A 1", "out_en": "[]"}, {"stage": "address", "inp": "台北市中山區南京東路二段100號5樓", "out": "臺北市中山區南京東路二段100號5樓", "changed": true, "inp_en": "台北市中山區南京東路二段100號5樓 — 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei City", "out_en": "臺北市中山區南京東路二段100號5樓 — same address; 台 replaced with 臺, the official character"}, {"stage": "option", "inp": "禮盒: spec=20A qty=1", "out": "20A 一盒 $1,150", "inp_en": "gift box: spec=20A qty=1", "out_en": "20A gift box · 1 box · $1,150"}, {"stage": "option", "inp": "家庭號: spec=None qty=None", "out": "(no match)", "inp_en": "family carton: spec=None qty=None", "out_en": "(no match)"}, {"stage": "row", "inp": "{\"orderer\": \"小美\", \"sender_name\": \"林小美\", \"sender_phone\": \"0912345678\", \"sender_address\": \"\", \"receiver_name\": \"王大同\", \"receiver_phone\": \"0922333444\", \"receiver_address\": \"台北市中山區南京東路二段100號5樓\", \"giftbox_spec\": \"20A\", \"giftbox_boxes\": 1, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"12345\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"老闆你好 我要訂梨子 / 寄件人 林小美 0912345678 / 1 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓 / 20A 一盒就好 麻煩8/19到貨 / 匯款好了 末五碼 12345\", \"issues\": [\"未提供寄件人地址\"]}", "out": ["2026/08/15 20:40:30", "小美", "林小美", "0912345678", "", "王大同", "0922333444", "臺北市中山區南京東路二段100號5樓", "20A 一盒 $1,150", "", "12345", "2026/8/19"], "problems": ["未提供寄件人地址"], "status": "review", "inp_en": "{\"orderer\": \"Xiaomei\", \"sender_name\": \"Lin Xiaomei\", \"sender_phone\": \"0912345678\", \"sender_address\": \"\", \"receiver_name\": \"Wang Datong\", \"receiver_phone\": \"0922333444\", \"receiver_address\": \"5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei City\", \"giftbox_spec\": \"20A\", \"giftbox_boxes\": 1, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"12345\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"Hi boss I'd like to order some pears / Sender is Lin Xiaomei 0912345678 / 1 Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei / Just one box of 20A please deliver on 8/19 / Transfer done, last five digits 12345\", \"issues\": [\"sender address not provided\"]}", "out_en": ["2026/08/15 20:40:30", "Xiaomei", "Lin Xiaomei", "0912345678", "", "Wang Datong", "0922333444", "5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei City", "20A gift box · 1 box · $1,150", "", "12345", "2026/8/19"], "problems_en": ["sender address not provided"]}, {"stage": "dedup", "inp": "王大同 / 0922333444 / 2026-08-19", "out": "王大同|0922333444|2026-08-19", "status": "review", "inp_en": "Wang Datong / 0922333444 / 2026-08-19", "out_en": "Wang Datong|0922333444|2026-08-19"}], "orders": [{"order": {"orderer": "小美", "sender_name": "林小美", "sender_phone": "0912345678", "sender_address": "", "receiver_name": "王大同", "receiver_phone": "0922333444", "receiver_address": "臺北市中山區南京東路二段100號5樓", "giftbox": "20A 一盒 $1,150", "family": null, "last5": "12345", "shipping_date": "2026-08-19", "source_quote": "老闆你好 我要訂梨子 / 寄件人 林小美 0912345678 / 1 收件人 王大同 0922333444 台北市中山區南京東路二段100號5樓 / 20A 一盒就好 麻煩8/19到貨 / 匯款好了 末五碼 12345"}, "row": ["2026/08/15 20:40:30", "小美", "林小美", "0912345678", "", "王大同", "0922333444", "臺北市中山區南京東路二段100號5樓", "20A 一盒 $1,150", "", "12345", "2026/8/19"], "problems": ["未提供寄件人地址"], "status": "review", "order_en": {"orderer": "Xiaomei", "sender_name": "Lin Xiaomei", "sender_phone": "0912345678", "sender_address": "", "receiver_name": "Wang Datong", "receiver_phone": "0922333444", "receiver_address": "5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei City", "giftbox": "20A gift box · 1 box · $1,150", "family": null, "last5": "12345", "shipping_date": "2026-08-19", "source_quote": "Hi boss I'd like to order some pears / Sender is Lin Xiaomei 0912345678 / 1 Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei / Just one box of 20A please deliver on 8/19 / Transfer done, last five digits 12345"}, "problems_en": ["sender address not provided"]}], "raw_log_en": "2026/08/13 09:02\tXiaomei😊\tHi boss🙏 I'd like to order some pears\n2026/08/13 09:03\tXiaomei😊\tSender is Lin Xiaomei 0912345678\n2026/08/13 09:04\tXiaomei😊\t1️⃣ Recipient Wang Datong 0922333444 5F, No.100, Sec.2, Nanjing E. Rd., Zhongshan Dist., Taipei🏠\n2026/08/13 09:05\tXiaomei😊\tJust one box of 20A❤️ please deliver on 8/19🚚\n2026/08/13 09:30\tXiaomei😊\tTransfer done, last five digits 12345✅\n"}, {"id": "multi", "title": "Two recipients, one amendment, one non-order", "note": "A gift order split across two addresses, a quantity change, and a browser who never buys.", "raw_log": "2026/08/13 10:12\t阿哲\t我要訂兩份送客戶\n2026/08/13 10:12\t阿哲\t寄件人寫 張阿哲 0933222111\n2026/08/13 10:13\t阿哲\t第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓\n2026/08/13 10:14\t阿哲\t第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓\n2026/08/13 10:15\t阿哲\t都是18A兩盒 19號送\n2026/08/13 10:41\t路人甲\t請問還有貨嗎\n2026/08/13 10:42\t老闆\t有的喔\n2026/08/13 10:44\t路人甲\t好我再想想\n2026/08/13 11:02\t阿哲\t抱歉 第一位改成18A四盒\n2026/08/13 19:20\t阿哲\t匯款了 末五碼 53900\n", "total_ms": 11460, "events": [{"stage": "sanitize", "inp": "2026/08/13 10:12\t阿哲\t我要訂兩份送客戶\n2026/08/13 10:12\t阿哲\t寄件人寫 張阿哲 0933222111\n2026/08/13 10:13\t阿哲\t第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓\n2026/08/13 10:14\t阿哲\t第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓\n2026/08/13 10:15\t阿哲\t都是18A兩盒 19號送\n2026/08/13 10:41\t路人甲\t請問還有貨嗎\n2026/08/13 10:42\t老闆\t有的喔\n2026/08/13 10:44\t路人甲\t好我再想想\n2026/08/13 11:02\t阿哲\t抱歉 第一位改成18A四盒\n2026/08/13 19:20\t阿哲\t匯款了 末五碼 53900\n", "out": "2026/08/13 10:12\t阿哲\t我要訂兩份送客戶\n2026/08/13 10:12\t阿哲\t寄件人寫 張阿哲 0933222111\n2026/08/13 10:13\t阿哲\t第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓\n2026/08/13 10:14\t阿哲\t第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓\n2026/08/13 10:15\t阿哲\t都是18A兩盒 19號送\n2026/08/13 10:41\t路人甲\t請問還有貨嗎\n2026/08/13 10:42\t老闆\t有的喔\n2026/08/13 10:44\t路人甲\t好我再想想\n2026/08/13 11:02\t阿哲\t抱歉 第一位改成18A四盒\n2026/08/13 19:20\t阿哲\t匯款了 末五碼 53900\n", "removed": 0, "inp_en": "2026/08/13 10:12\tA-Zhe\tI want to order two gifts for clients\n2026/08/13 10:12\tA-Zhe\tPut Zhang A-Zhe 0933222111 as the sender\n2026/08/13 10:13\tA-Zhe\tFirst one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City\n2026/08/13 10:14\tA-Zhe\tSecond one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City\n2026/08/13 10:15\tA-Zhe\tBoth 18A two boxes, deliver on the 19th\n2026/08/13 10:41\tPasserby\tDo you still have stock?\n2026/08/13 10:42\tOwner\tYes we do\n2026/08/13 10:44\tPasserby\tOK, let me think about it\n2026/08/13 11:02\tA-Zhe\tSorry — change the first one to 18A four boxes\n2026/08/13 19:20\tA-Zhe\tTransferred, last five digits 53900\n", "out_en": "2026/08/13 10:12\tA-Zhe\tI want to order two gifts for clients\n2026/08/13 10:12\tA-Zhe\tPut Zhang A-Zhe 0933222111 as the sender\n2026/08/13 10:13\tA-Zhe\tFirst one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City\n2026/08/13 10:14\tA-Zhe\tSecond one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City\n2026/08/13 10:15\tA-Zhe\tBoth 18A two boxes, deliver on the 19th\n2026/08/13 10:41\tPasserby\tDo you still have stock?\n2026/08/13 10:42\tOwner\tYes we do\n2026/08/13 10:44\tPasserby\tOK, let me think about it\n2026/08/13 11:02\tA-Zhe\tSorry — change the first one to 18A four boxes\n2026/08/13 19:20\tA-Zhe\tTransferred, last five digits 53900\n"}, {"stage": "extract", "ms": 4, "inp": "chat log, 362 chars · today = 2026-08-15(星期六)", "out": "[{\"orderer\":\"阿哲\",\"sender_name\":\"張阿哲\",\"sender_phone\":\"0933222111\",\"sender_address\":\"\",\"receiver_name\":\"陳美惠\",\"receiver_phone\":\"0955111222\",\"receiver_address\":\"新竹市東區光復路一段88號3樓\",\"giftbox_spec\":\"18A\",\"giftbox_boxes\":4,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"53900\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓；都是18A兩盒 19號送；抱歉 第一位改成18A四盒；匯款了 末五碼 53900\",\"issues\":[\"未提供寄件人地址\",\"第一位數量由18A兩盒改為18A四盒\"]},{\"orderer\":\"阿哲\",\"sender_name\":\"張阿哲\",\"sender_phone\":\"0933222111\",\"sender_address\":\"\",\"receiver_name\":\"吳建良\",\"receiver_phone\":\"0966333444\",\"receiver_address\":\"台中市西屯區台灣大道三段99號12樓\",\"giftbox_spec\":\"18A\",\"giftbox_boxes\":2,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"53900\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓；都是18A兩盒 19號送；匯款了 末五碼 53900\",\"issues\":[\"未提供寄件人地址\"]}]]", "inp_en": "chat log, 362 chars · today = 2026-08-15(Saturday)", "out_en": "[{\"orderer\":\"A-Zhe\",\"sender_name\":\"Zhang A-Zhe\",\"sender_phone\":\"0933222111\",\"sender_address\":\"\",\"receiver_name\":\"Chen Meihui\",\"receiver_phone\":\"0955111222\",\"receiver_address\":\"3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City\",\"giftbox_spec\":\"18A\",\"giftbox_boxes\":4,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"53900\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"First one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City；Both 18A two boxes, deliver on the 19th；Sorry — change the first one to 18A four boxes；Transferred, last five digits 53900\",\"issues\":[\"sender address not provided\",\"first recipient amended from 18A two boxes to 18A four boxes\"]},{\"orderer\":\"A-Zhe\",\"sender_name\":\"Zhang A-Zhe\",\"sender_phone\":\"0933222111\",\"sender_address\":\"\",\"receiver_name\":\"Wu Jianliang\",\"receiver_phone\":\"0966333444\",\"receiver_address\":\"12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City\",\"giftbox_spec\":\"18A\",\"giftbox_boxes\":2,\"family_spec\":null,\"family_boxes\":null,\"last5\":\"53900\",\"shipping_date\":\"2026-08-19\",\"source_quote\":\"Second one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City；Both 18A two boxes, deliver on the 19th；Transferred, last five digits 53900\",\"issues\":[\"sender address not provided\"]}]]"}, {"stage": "recall", "ms": 5679, "inp": "- 陳美惠／18A 4\n- 吳建良／18A 2", "out": "[]", "inp_en": "- Chen Meihui／18A 4\n- Wu Jianliang／18A 2", "out_en": "[]"}, {"stage": "address", "inp": "新竹市東區光復路一段88號3樓", "out": "新竹市東區光復路一段88號3樓", "changed": false, "inp_en": "新竹市東區光復路一段88號3樓 — 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City", "out_en": "新竹市東區光復路一段88號3樓 — already in standard form, unchanged"}, {"stage": "option", "inp": "禮盒: spec=18A qty=4", "out": "18A 四盒 $3,700", "inp_en": "gift box: spec=18A qty=4", "out_en": "18A gift box · 4 boxes · $3,700"}, {"stage": "option", "inp": "家庭號: spec=None qty=None", "out": "(no match)", "inp_en": "family carton: spec=None qty=None", "out_en": "(no match)"}, {"stage": "row", "inp": "{\"orderer\": \"阿哲\", \"sender_name\": \"張阿哲\", \"sender_phone\": \"0933222111\", \"sender_address\": \"\", \"receiver_name\": \"陳美惠\", \"receiver_phone\": \"0955111222\", \"receiver_address\": \"新竹市東區光復路一段88號3樓\", \"giftbox_spec\": \"18A\", \"giftbox_boxes\": 4, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"53900\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓；都是18A兩盒 19號送；抱歉 第一位改成18A四盒；匯款了 末五碼 53900\", \"issues\": [\"未提供寄件人地址\", \"第一位數量由18A兩盒改為18A四盒\"]}", "out": ["2026/08/15 20:40:33", "阿哲", "張阿哲", "0933222111", "", "陳美惠", "0955111222", "新竹市東區光復路一段88號3樓", "18A 四盒 $3,700", "", "53900", "2026/8/19"], "problems": ["未提供寄件人地址", "第一位數量由18A兩盒改為18A四盒"], "status": "review", "inp_en": "{\"orderer\": \"A-Zhe\", \"sender_name\": \"Zhang A-Zhe\", \"sender_phone\": \"0933222111\", \"sender_address\": \"\", \"receiver_name\": \"Chen Meihui\", \"receiver_phone\": \"0955111222\", \"receiver_address\": \"3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City\", \"giftbox_spec\": \"18A\", \"giftbox_boxes\": 4, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"53900\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"First one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City；Both 18A two boxes, deliver on the 19th；Sorry — change the first one to 18A four boxes；Transferred, last five digits 53900\", \"issues\": [\"sender address not provided\", \"first recipient amended from 18A two boxes to 18A four boxes\"]}", "out_en": ["2026/08/15 20:40:33", "A-Zhe", "Zhang A-Zhe", "0933222111", "", "Chen Meihui", "0955111222", "3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City", "18A gift box · 4 boxes · $3,700", "", "53900", "2026/8/19"], "problems_en": ["sender address not provided", "first recipient amended from 18A two boxes to 18A four boxes"]}, {"stage": "address", "inp": "台中市西屯區台灣大道三段99號12樓", "out": "臺中市西屯區臺灣大道三段99號12樓", "changed": true, "inp_en": "台中市西屯區台灣大道三段99號12樓 — 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City", "out_en": "臺中市西屯區臺灣大道三段99號12樓 — same address; 台 replaced with 臺, the official character"}, {"stage": "option", "inp": "禮盒: spec=18A qty=2", "out": "18A 兩盒 $1,910", "inp_en": "gift box: spec=18A qty=2", "out_en": "18A gift box · 2 boxes · $1,910"}, {"stage": "option", "inp": "家庭號: spec=None qty=None", "out": "(no match)", "inp_en": "family carton: spec=None qty=None", "out_en": "(no match)"}, {"stage": "row", "inp": "{\"orderer\": \"阿哲\", \"sender_name\": \"張阿哲\", \"sender_phone\": \"0933222111\", \"sender_address\": \"\", \"receiver_name\": \"吳建良\", \"receiver_phone\": \"0966333444\", \"receiver_address\": \"台中市西屯區台灣大道三段99號12樓\", \"giftbox_spec\": \"18A\", \"giftbox_boxes\": 2, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"53900\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓；都是18A兩盒 19號送；匯款了 末五碼 53900\", \"issues\": [\"未提供寄件人地址\"]}", "out": ["2026/08/15 20:40:33", "阿哲", "張阿哲", "0933222111", "", "吳建良", "0966333444", "臺中市西屯區臺灣大道三段99號12樓", "18A 兩盒 $1,910", "", "53900", "2026/8/19"], "problems": ["未提供寄件人地址"], "status": "review", "inp_en": "{\"orderer\": \"A-Zhe\", \"sender_name\": \"Zhang A-Zhe\", \"sender_phone\": \"0933222111\", \"sender_address\": \"\", \"receiver_name\": \"Wu Jianliang\", \"receiver_phone\": \"0966333444\", \"receiver_address\": \"12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City\", \"giftbox_spec\": \"18A\", \"giftbox_boxes\": 2, \"family_spec\": null, \"family_boxes\": null, \"last5\": \"53900\", \"shipping_date\": \"2026-08-19\", \"source_quote\": \"Second one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City；Both 18A two boxes, deliver on the 19th；Transferred, last five digits 53900\", \"issues\": [\"sender address not provided\"]}", "out_en": ["2026/08/15 20:40:33", "A-Zhe", "Zhang A-Zhe", "0933222111", "", "Wu Jianliang", "0966333444", "12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City", "18A gift box · 2 boxes · $1,910", "", "53900", "2026/8/19"], "problems_en": ["sender address not provided"]}, {"stage": "dedup", "inp": "陳美惠 / 0955111222 / 2026-08-19", "out": "陳美惠|0955111222|2026-08-19", "status": "review", "inp_en": "Chen Meihui / 0955111222 / 2026-08-19", "out_en": "Chen Meihui|0955111222|2026-08-19"}, {"stage": "dedup", "inp": "吳建良 / 0966333444 / 2026-08-19", "out": "吳建良|0966333444|2026-08-19", "status": "review", "inp_en": "Wu Jianliang / 0966333444 / 2026-08-19", "out_en": "Wu Jianliang|0966333444|2026-08-19"}], "orders": [{"order": {"orderer": "阿哲", "sender_name": "張阿哲", "sender_phone": "0933222111", "sender_address": "", "receiver_name": "陳美惠", "receiver_phone": "0955111222", "receiver_address": "新竹市東區光復路一段88號3樓", "giftbox": "18A 四盒 $3,700", "family": null, "last5": "53900", "shipping_date": "2026-08-19", "source_quote": "第一位 陳美惠 0955111222 新竹市東區光復路一段88號3樓；都是18A兩盒 19號送；抱歉 第一位改成18A四盒；匯款了 末五碼 53900"}, "row": ["2026/08/15 20:40:33", "阿哲", "張阿哲", "0933222111", "", "陳美惠", "0955111222", "新竹市東區光復路一段88號3樓", "18A 四盒 $3,700", "", "53900", "2026/8/19"], "problems": ["未提供寄件人地址", "第一位數量由18A兩盒改為18A四盒"], "status": "review", "order_en": {"orderer": "A-Zhe", "sender_name": "Zhang A-Zhe", "sender_phone": "0933222111", "sender_address": "", "receiver_name": "Chen Meihui", "receiver_phone": "0955111222", "receiver_address": "3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City", "giftbox": "18A gift box · 4 boxes · $3,700", "family": null, "last5": "53900", "shipping_date": "2026-08-19", "source_quote": "First one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City；Both 18A two boxes, deliver on the 19th；Sorry — change the first one to 18A four boxes；Transferred, last five digits 53900"}, "problems_en": ["sender address not provided", "first recipient amended from 18A two boxes to 18A four boxes"]}, {"order": {"orderer": "阿哲", "sender_name": "張阿哲", "sender_phone": "0933222111", "sender_address": "", "receiver_name": "吳建良", "receiver_phone": "0966333444", "receiver_address": "臺中市西屯區臺灣大道三段99號12樓", "giftbox": "18A 兩盒 $1,910", "family": null, "last5": "53900", "shipping_date": "2026-08-19", "source_quote": "第二位 吳建良 0966333444 台中市西屯區台灣大道三段99號12樓；都是18A兩盒 19號送；匯款了 末五碼 53900"}, "row": ["2026/08/15 20:40:33", "阿哲", "張阿哲", "0933222111", "", "吳建良", "0966333444", "臺中市西屯區臺灣大道三段99號12樓", "18A 兩盒 $1,910", "", "53900", "2026/8/19"], "problems": ["未提供寄件人地址"], "status": "review", "order_en": {"orderer": "A-Zhe", "sender_name": "Zhang A-Zhe", "sender_phone": "0933222111", "sender_address": "", "receiver_name": "Wu Jianliang", "receiver_phone": "0966333444", "receiver_address": "12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City", "giftbox": "18A gift box · 2 boxes · $1,910", "family": null, "last5": "53900", "shipping_date": "2026-08-19", "source_quote": "Second one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City；Both 18A two boxes, deliver on the 19th；Transferred, last five digits 53900"}, "problems_en": ["sender address not provided"]}], "raw_log_en": "2026/08/13 10:12\tA-Zhe\tI want to order two gifts for clients\n2026/08/13 10:12\tA-Zhe\tPut Zhang A-Zhe 0933222111 as the sender\n2026/08/13 10:13\tA-Zhe\tFirst one: Chen Meihui 0955111222 3F, No.88, Sec.1, Guangfu Rd., East Dist., Hsinchu City\n2026/08/13 10:14\tA-Zhe\tSecond one: Wu Jianliang 0966333444 12F, No.99, Sec.3, Taiwan Blvd., Xitun Dist., Taichung City\n2026/08/13 10:15\tA-Zhe\tBoth 18A two boxes, deliver on the 19th\n2026/08/13 10:41\tPasserby\tDo you still have stock?\n2026/08/13 10:42\tOwner\tYes we do\n2026/08/13 10:44\tPasserby\tOK, let me think about it\n2026/08/13 11:02\tA-Zhe\tSorry — change the first one to 18A four boxes\n2026/08/13 19:20\tA-Zhe\tTransferred, last five digits 53900\n"}], "summary": {"lines": [{"text": "18A 禮盒 2盒*1個地址", "category": "禮盒", "spec": "18A", "quantity": 2, "unit": "盒", "addresses": 1, "total_units": 2, "text_en": "18A gift box · 2 boxes × 1 address"}, {"text": "18A 禮盒 4盒*1個地址", "category": "禮盒", "spec": "18A", "quantity": 4, "unit": "盒", "addresses": 1, "total_units": 4, "text_en": "18A gift box · 4 boxes × 1 address"}, {"text": "20A 禮盒 1盒*1個地址", "category": "禮盒", "spec": "20A", "quantity": 1, "unit": "盒", "addresses": 1, "total_units": 1, "text_en": "20A gift box · 1 box × 1 address"}], "order_count": 3, "totals": {"盒": 7}, "unparsed": [], "totals_en": {"boxes": 7}}, "flow": [{"id": "webhook", "name": "LINE Bot", "desc": "live intake", "dashed": true}, {"id": "paste", "name": "Paste log", "desc": "local Flask UI"}, {"id": "sanitize", "name": "Sanitize", "desc": "emoji / zero-width"}, {"id": "extract", "name": "Extract", "desc": "DSPy pass 1"}, {"id": "recall", "name": "Recall", "desc": "DSPy pass 2"}, {"id": "rules", "name": "Rules", "desc": "options / address"}, {"id": "dedup", "name": "Dedup", "desc": "ready / review / dup"}, {"id": "review", "name": "Human gate", "desc": "pick rows"}, {"id": "write", "name": "Write sheet", "desc": "verify cols, A:L"}, {"id": "tabs", "name": "Date tabs", "desc": "split + packing list"}], "tiles": [["DSPy · 2 passes", "extract, then a second pass that only looks for dropped orders"], ["12 columns", "written straight into the live Google Form response sheet"], ["3 states", "ready / review / duplicate — only ready is written by default"], ["Langfuse", "one trace session per order, keyed the same way as dedup"]], "notwired": [{"name": "Live LINE Bot intake", "state": "Webhook handler and SDK wired in main.py, but not deployed — the chat log is pasted in by hand today.", "left": "A public HTTPS endpoint, channel secrets in the deploy env, and a decision on when to trigger: per message is too eager, since one order is usually spread across several."}, {"name": "Daily report push", "state": "Defined as domain vocabulary in CONTEXT.md; not implemented.", "left": "Cut-off time per shipping date, then push the packing summary to the owner instead of waiting to be asked."}, {"name": "LIFF order editor", "state": "HTML templates exist; not connected to the current 12-column schema.", "left": "Rebind the form fields, or drop it — the local review UI already covers the same job."}, {"name": "Auto-learning loop", "state": "Collector and training manager written, but the module fails to import: it pulls a SQLAlchemy type that does not exist.", "left": "Built too early, before there was enough real data to learn from. Either fix the import and feed it reviewed rows, or delete it."}], "code": [{"id": "sanitize", "stage": "Sanitize", "title": "Strip emoji before the model sees them", "path": "src/utils/text_sanitizer.py", "say": "Cleaned twice — once on the whole log before the LLM, and again on every field it returns, because the model can still emit emoji on its own. Keycap emoji keep their digit: losing a quantity would be far worse than leaving an emoji in.", "code": "# Emoji plus the zero-width and modifier characters that travel with\n# them. Deliberately leaves CJK, full-width punctuation and math symbols\n# alone — those legitimately appear in orders.\n_EMOJI_PATTERN = re.compile(\n    '['\n    '\\U0001F000-\\U0001FAFF'   # faces, gestures, objects, flags\n    '\\U00002600-\\U000027BF'   # misc symbols + dingbats\n    '\\U0000FE00-\\U0000FE0F'   # variation selectors\n    '\\U0000200D'              # ZWJ, for family-style sequences\n    '\\U000020E3'              # keycap enclosure (1 + FE0F + 20E3)\n    ']', flags=re.UNICODE)\n\ndef strip_emoji(text: str) -> str:\n    # Keycap emoji: drop the enclosure, keep the digit\n    cleaned = _EMOJI_PATTERN.sub('', text)\n    cleaned = _ZERO_WIDTH.sub('', cleaned)\n    cleaned = re.sub(r'[ \\t]{2,}', ' ', cleaned)\n    return cleaned"}, {"id": "extract", "stage": "Extract", "title": "The DSPy signature is the spec", "path": "src/utils/dspy_modules/chat_log_parser.py", "say": "Rules 4 and 6 are an asymmetry made explicit. A duplicate is caught downstream by the dedup key and costs a glance; a dropped order ships nothing and nobody finds out until the customer calls. So the prompt is deliberately tuned toward the cheap failure.", "code": "class ChatLogOrderSignature(dspy.Signature):\n    \"\"\"Extract every order that was actually placed.\n\n    3. If the customer later amends (quantity, address, date), the LAST\n       statement wins. Do not output orders they explicitly cancelled.\n    4. Only \"just asking / still thinking / said no\" is not an order.\n       If they said what they want to buy, it IS an order — even if\n       unpaid, or missing a phone, address or date. Record the gaps\n       in `issues`; never drop an order for being incomplete.\n    6. Prefer over-reporting to missing one. The cost of losing an\n       order far exceeds the cost of one extra.\n    \"\"\"\n    chat_log     = dspy.InputField(desc=\"raw LINE chat log\")\n    current_date = dspy.InputField(desc=\"today, to resolve 'this Wednesday'\")\n    orders_json  = dspy.OutputField(desc=\"array of order objects\")"}, {"id": "recall", "stage": "Recall", "title": "Go back and look for what pass one missed", "path": "src/utils/dspy_modules/chat_log_parser.py", "say": "This is the stage I would defend hardest. It costs a second call on every import and usually returns an empty list — and that empty list is exactly what I am paying for.", "code": "class OrderRecallSignature(dspy.Signature):\n    \"\"\"Check whether any order was missed.\n\n    In practice a single extraction pass silently drops orders, and\n    different models drop different ones: some lose the second\n    recipient, some throw away a customer who said they would pay\n    later. A missing order is the hardest error to notice — a wrong\n    field is visible, a vanished order is not.\n    \"\"\"\n\ndef _recall_missing(self, chat_log, current_date, orders):\n    try:\n        result = self.recall(...)\n        candidates = self._extract_orders(result.missing_orders_json)\n    except Exception as error:\n        # A quality check must never take down the thing it checks:\n        # if recall fails, pass one's result still stands.\n        logger.warning(f'recall failed, keeping pass 1: {error}')\n        return []\n    seen = {self._identity(o) for o in orders}\n    return [c for c in candidates\n            if self._identity(c) not in seen and not self._is_empty(c)]"}, {"id": "json", "stage": "Robustness", "title": "Tolerate the prose the model writes around its JSON", "path": "src/utils/dspy_modules/chat_log_parser.py", "say": "This one crashed a real import while I was preparing this demo. The old fallback used a greedy bracket match, so one stray closing bracket in the model's trailing sentence swallowed everything and the whole batch failed. raw_decode takes the first complete JSON value and ignores the rest.", "code": "try:\n    parsed = json.loads(text)\nexcept json.JSONDecodeError:\n    # The model sometimes writes a sentence before or after the JSON.\n    # Start at the first [ or { and raw_decode the first complete value,\n    # ignoring whatever trails it.\n    #\n    # This used to be a greedy \\[.*\\] match, which grabbed everything\n    # between the first [ and the LAST ] anywhere in the output — one\n    # extra bracket in a trailing note and the entire batch failed.\n    starts = [i for i in (text.find('['), text.find('{')) if i >= 0]\n    if not starts:\n        raise ValueError(f'no order JSON in LLM output: {raw[:200]}')\n    parsed, _ = json.JSONDecoder().raw_decode(text[min(starts):])"}, {"id": "options", "stage": "Rules", "title": "Map to options that actually exist", "path": "src/utils/form_options.py", "say": "The model returns a spec and a count, never the option string itself. If it wrote the string it could invent an option the form does not offer, and the row would look perfectly fine while being unfillable. Note the missing comma on line 5 — that typo is in the real form, so it is copied exactly. Fixing it here would break the match.", "code": "GIFTBOX_OPTIONS: Dict[Tuple[str, int], str] = {\n    ('20A', 1): '20A one box $1,150',\n    ('20A', 2): '20A two boxes $2,170',        # tiered, not unit x qty\n    ('20A', 5): '20A five boxes $5,370 (two cartons)',\n    ('18A', 7): '18A seven boxes $6510 (two cartons)',  # form has no comma\n}\n\nif count > max_boxes:\n    problems.append(\n        f'{label} {count}{unit} exceeds the form maximum ({max_boxes})')\n    return None"}, {"id": "dedup", "stage": "Dedup", "title": "One normalized identity key per order", "path": "src/utils/form_sheet_client.py", "say": "0955-111-222 and 0955111222 are the same customer. Normalizing before comparing is the difference between a dedup check and a decoration.", "code": "def dedup_key(receiver_name, receiver_phone, shipping_date):\n    \"\"\"Identity key: strip phone separators and normalize the date, so\n    formatting differences do not cause a miss.\"\"\"\n    phone = ''.join(ch for ch in (receiver_phone or '') if ch.isdigit())\n    date = _normalize_date(shipping_date)\n    return f'{(receiver_name or \"\").strip()}|{phone}|{date}'\n\n@property\ndef status(self) -> str:\n    if self.duplicate:\n        return 'duplicate'\n    return 'review' if self.problems else 'ready'"}, {"id": "verify", "stage": "Write", "title": "Verify the columns before every write", "path": "src/utils/form_sheet_client.py", "say": "This is the failure mode that worried me most: nothing throws, nothing looks wrong, and phone numbers quietly start landing in the address column. One extra read per write buys a loud failure instead of a silent one.", "code": "def verify_columns(self) -> Dict[str, Any]:\n    \"\"\"Confirm the sheet's column order matches what the code expects.\n\n    Editing a Google Form question shifts the columns, and every write\n    after that lands in the wrong field — so verify before each write.\"\"\"\n    actual = ...  # read row 1, A1:L1\n    if actual == FORM_COLUMNS:\n        return {'ok': True, 'columns': actual}\n\n    for index, expected in enumerate(FORM_COLUMNS):\n        found = actual[index] if index < len(actual) else '<missing>'\n        if found != expected:\n            column = chr(ord('A') + index)\n            mismatches.append(\n                f'column {column}: expected {expected}, got {found}')"}, {"id": "tabs", "stage": "Split", "title": "Date tabs are a projection, not a copy", "path": "src/services/sheet_date_organizer.py", "say": "Because each tab is rebuilt from scratch, re-running is idempotent — and that same property forces the cleanup: if an order moves to another date, the tab it left behind is holding rows with no source, which is simply wrong data.", "code": "# Once an order's delivery date changes, the old date's tab is left\n# holding rows with no source. A date tab is a projection of the master\n# sheet — stale rows are simply wrong — so those get cleared too.\nstale = [name for name in existing\n         if is_date_sheet(name) and name not in groups]\n\n# RAW, not USER_ENTERED: these values already came out of the master\n# sheet as display strings. Letting Sheets re-interpret them turns the\n# phone number 0937... into a number and eats the leading zero.\nself.service.spreadsheets().values().update(\n    spreadsheetId=self.sheet_id,\n    range=f\"'{sheet_name}'!A1\",\n    valueInputOption='RAW',\n    body={'values': [header] + data_rows + (extra_rows or []),\n          'majorDimension': 'ROWS'})"}, {"id": "tracing", "stage": "Observe", "title": "One trace session per order", "path": "src/utils/langfuse_tracing.py", "say": "The session key is the dedup key, so when a customer amends an order and it is re-imported, the new run lands in the same session and one timeline holds the whole history. Tracing is optional: with no API keys it disables itself silently — observability must never be able to break the thing it observes.", "code": "# Only span CREATION may fail silently; anything raised after the yield\n# is the caller's business error and must propagate untouched.\n#\n# This used to wrap the whole with-block including the yield. A caller\n# exception was caught here and then yielded again — which a context\n# manager may not do — so Python replaced it with\n# \"RuntimeError: generator didn't stop after throw()\" and the real\n# error and traceback vanished.\nstack = ExitStack()\ntry:\n    span = stack.enter_context(\n        client.start_as_current_observation(as_type='span', name=name))\n    if session_id:\n        stack.enter_context(propagate_attributes(session_id=session_id[:200]))\nexcept Exception as error:\n    logger.warning(f'span \"{name}\" failed, skipping trace: {error}')\n    stack.close()\n    yield _NullSpan()\n    return\n\nwith stack:      # propagates the caller's exception, closes the span\n    yield span"}], "columns": ["Timestamp", "Orderer (LINE name)", "Sender", "Sender phone", "Sender address", "Recipient", "Recipient phone", "Recipient address", "Gift box item", "Family carton item", "Transfer last 5 digits", "Delivery date"]};
+
+const PAGES = ["Overview", "Replay Theater"];
+let page = 0;
+
+function el(t, c, txt) { const e = document.createElement(t);
+  if (c) e.className = c; if (txt !== undefined && txt !== null)
+    e.textContent = txt; return e; }
+
+/* 電話與末五碼在畫面上可遮蔽；本 demo 的人名電話都是自編的，
+   但 pipeline 真的跑過的資料仍照遮蔽處理，示範資料外洩的防線。 */
+const PII = [/\b09\d{2}-?\d{3}-?\d{3}\b/g, /\b0\d{1,2}-?\d{6,8}\b/g];
+function pii(text) {
+  const span = el("span");
+  let parts = [{ t: String(text ?? ""), p: false }];
+  for (const re of PII) {
+    const next = [];
+    for (const seg of parts) {
+      if (seg.p) { next.push(seg); continue; }
+      let last = 0, m; re.lastIndex = 0;
+      while ((m = re.exec(seg.t))) {
+        if (m.index > last) next.push({ t: seg.t.slice(last, m.index), p: false });
+        next.push({ t: m[0], p: true });
+        last = m.index + m[0].length;
+      }
+      if (last < seg.t.length) next.push({ t: seg.t.slice(last), p: false });
+    }
+    parts = next;
+  }
+  for (const seg of parts) {
+    if (seg.p) span.appendChild(el("span", "pii", seg.t));
+    else span.appendChild(document.createTextNode(seg.t));
+  }
+  return span;
+}
+
+/* 顯示值：預設英文對照，勾選後切回 pipeline 真正輸出的中文原文 */
+let showZh = false;
+function T(obj, field) {
+  if (showZh) return obj[field];
+  const en = obj[field + "_en"];
+  return en === undefined || en === null ? obj[field] : en;
+}
+
+function ioRow(tag, text, mono) {
+  const row = el("div", "io-row");
+  row.appendChild(el("span", "io-tag " + (tag === "IN" ? "io-in" : "io-out"), tag));
+  const v = el("span", "io-val" + (mono ? " io-mono" : ""));
+  v.appendChild(pii(text === "" || text == null ? "—" : text));
+  row.appendChild(v);
+  return row;
+}
+
+function badge(status) {
+  return el("span", "badge b-" + status, status);
+}
+
+/* 極簡三色上色：先切出字串與註解，剩下的才上關鍵字，避免互相污染 */
+function hlPy(src) {
+  const KW = /\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|in|not|and|or|None|True|False|continue|break|import|from|lambda|raise|pass|yield)\b/g;
+  const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  let out = "", i = 0;
+  const re = /("""[\s\S]*?"""|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|#[^\n]*)/g;
+  let m;
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(i, m.index)).replace(KW, '<span class="tok-k">$1</span>');
+    const cls = m[0][0] === "#" ? "tok-c"
+      : m[0].startsWith('"""') ? "tok-c" : "tok-s";
+    out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+    i = m.index + m[0].length;
+  }
+  out += esc(src.slice(i)).replace(KW, '<span class="tok-k">$1</span>');
+  return out;
+}
+
+/* ── flow ── */
+function buildFlow(hl) {
+  const f = el("div", "flow");
+  DATA.flow.forEach((n, i) => {
+    if (i) f.appendChild(el("span", "farrow", n.dashed ? "⇢" : "→"));
+    const d = el("div", "fnode" + (hl === n.id ? " hl" : "") +
+      (n.dashed ? " dash" : ""));
+    d.appendChild(el("b", null, n.name));
+    d.appendChild(el("span", null, n.desc));
+    f.appendChild(d);
+  });
+  return f;
+}
+
+/* ── Overview ── */
+const codeOpen = new Set([DATA.code[0].id]);
+
+function buildCodeSection() {
+  const card = el("div", "card");
+  card.appendChild(el("h2", null, "How it's built — the code behind each stage"));
+  card.appendChild(el("p", "small mut",
+    "Real fragments from the repository, trimmed to the load-bearing lines " +
+    "so they can be read aloud. Comments translated from Traditional " +
+    "Chinese; the code itself is unmodified. Click a row to expand."));
+  DATA.code.forEach(sn => {
+    const cc = el("div", "codecard" + (codeOpen.has(sn.id) ? " open" : ""));
+    const head = el("div", "chead");
+    head.tabIndex = 0;
+    head.appendChild(el("span", "cstage", sn.stage));
+    head.appendChild(el("span", "ctitle", sn.title));
+    head.appendChild(el("span", "caret",
+      codeOpen.has(sn.id) ? "▲ collapse" : "▼ code"));
+    const toggle = () => {
+      codeOpen.has(sn.id) ? codeOpen.delete(sn.id) : codeOpen.add(sn.id);
+      render();
+    };
+    head.onclick = toggle;
+    head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault(); toggle(); } };
+    cc.appendChild(head);
+    const body = el("div", "cbody");
+    body.appendChild(el("div", "csay", "🗣 " + sn.say));
+    body.appendChild(el("div", "cpath", sn.path));
+    const pre = el("pre", "code");
+    pre.innerHTML = hlPy(sn.code);
+    body.appendChild(pre);
+    cc.appendChild(body);
+    card.appendChild(cc);
+  });
+  return card;
+}
+
+function pageOverview() {
+  const s = el("section", "page");
+
+  const intro = el("div", "card");
+  intro.appendChild(el("h2", null, "In one sentence"));
+  intro.appendChild(el("p", "lead",
+    "An agent that reads a raw LINE group conversation, extracts every order " +
+    "that was actually placed — across scattered messages, amendments and " +
+    "small talk — validates each one against the shop's real product options, " +
+    "and writes it to the Google Form response sheet, then splits that sheet " +
+    "by delivery date and prints what has to be packed."));
+  intro.appendChild(el("p", "small mut",
+    "Built for a pear gift-box shop that was retyping LINE messages into a " +
+    "spreadsheet by hand. Every stage below is running today except the four " +
+    "marked with dashes."));
+  s.appendChild(intro);
+
+  const tiles = el("div", "tiles");
+  for (const [v, l] of DATA.tiles) {
+    const t = el("div", "tile");
+    t.appendChild(el("div", "v", v));
+    t.appendChild(el("div", "l", l));
+    tiles.appendChild(t);
+  }
+  s.appendChild(tiles);
+
+  const flowCard = el("div", "card");
+  flowCard.appendChild(el("h2", null, "Pipeline"));
+  flowCard.appendChild(buildFlow(null));
+  const lg = el("div", "legend");
+  const a = el("i"); a.appendChild(el("span", "lsw"));
+  a.appendChild(document.createTextNode("built and running"));
+  const b = el("i"); b.appendChild(el("span", "lsw d"));
+  b.appendChild(document.createTextNode("not wired up yet"));
+  lg.appendChild(a); lg.appendChild(b);
+  flowCard.appendChild(lg);
+  flowCard.appendChild(el("p", "small mut",
+    "Two things carry most of the design: a second LLM pass whose only job " +
+    "is to find orders the first pass silently dropped, and a human gate — " +
+    "nothing reaches the spreadsheet without someone selecting it."));
+  s.appendChild(flowCard);
+
+  s.appendChild(buildCodeSection());
+
+  const nw = el("div", "card");
+  nw.appendChild(el("h2", null, "Not wired up yet"));
+  nw.appendChild(el("p", "small mut",
+    "Listed rather than hidden. Being asked about these and having an answer " +
+    "beats being caught claiming they work."));
+  const tb = el("table", "t");
+  const hr = el("tr");
+  ["Track", "State today", "What's left"].forEach(h =>
+    hr.appendChild(el("th", null, h)));
+  tb.appendChild(hr);
+  DATA.notwired.forEach(n => {
+    const tr = el("tr");
+    tr.appendChild(el("td", null, n.name));
+    tr.appendChild(el("td", "mut", n.state));
+    tr.appendChild(el("td", "mut", n.left));
+    tb.appendChild(tr);
+  });
+  nw.appendChild(tb);
+  s.appendChild(nw);
+  return s;
+}
+
+/* ── Replay Theater ── */
+const th = { c: 0, step: 0 };
+
+const STAGE_LABEL = {
+  sanitize: "Sanitize", extract: "Extract · pass 1", recall: "Recall · pass 2",
+  address: "Address", option: "Option map", row: "Build row", dedup: "Dedup key",
+};
+const STAGE_NODE = {
+  sanitize: "sanitize", extract: "extract", recall: "recall",
+  address: "rules", option: "rules", row: "rules", dedup: "dedup",
+};
+
+function narration(ev) {
+  switch (ev.stage) {
+    case "sanitize":
+      return ev.removed
+        ? ev.removed + " emoji / zero-width characters removed before the " +
+          "model sees anything. Fewer tokens, and nothing for it to copy " +
+          "into a name or an address."
+        : "No emoji in this conversation, so the text passes through " +
+          "unchanged — the stage still runs, it just has nothing to do.";
+    case "extract":
+      return "One LLM call over the whole conversation. It has to merge " +
+        "details scattered across messages, apply later amendments over " +
+        "earlier ones, and ignore anyone who was only asking.";
+    case "recall":
+      return ev.out.trim() === "[]"
+        ? "The second pass re-read the same log against what pass one found " +
+          "and confirmed nothing was missed. Empty is the good outcome — " +
+          "and it still has to be paid for, because a silent drop is the " +
+          "one error nobody catches downstream."
+        : "The second pass found an order the first pass dropped. It gets " +
+          "tagged as recovered, so the reviewer knows which row the first " +
+          "pass was not confident about.";
+    case "address":
+      return ev.changed
+        ? "Address normalized by the rule base — note 台 → 臺, the official " +
+          "character. Rules, not the model: this is a lookup problem, and a " +
+          "lookup cannot hallucinate a district that does not exist."
+        : "Address already in standard form; the normalizer left it alone.";
+    case "option":
+      return ev.out === "(no match)"
+        ? "Nothing ordered in this category, so there is nothing to map."
+        : "The model only ever returned a spec and a count. The exact " +
+          "dropdown string comes from a lookup table — if the model wrote " +
+          "it, it could invent an option the form does not offer.";
+    case "row":
+      return "Twelve columns, in the sheet's exact order. Status is " +
+        (ev.status === "ready"
+          ? "ready — complete, so it can be written."
+          : "review — " + T(ev, "problems").join(" / ") +
+            ". It will not be written unless a human opts in.");
+    case "dedup":
+      return "Identity key for this order. Phone separators stripped and the " +
+        "date normalized first, so the same order typed twice with different " +
+        "punctuation still collides. The same key is the Langfuse session id.";
+    default: return "";
+  }
+}
+
+function pageTheater() {
+  const s = el("section", "page");
+
+  const pick = el("div", "card");
+  pick.appendChild(el("h2", null, "Replay Theater — a real run, step by step"));
+  const sel = el("div", "controls");
+  DATA.cases.forEach((c, i) => {
+    const b = el("button", i === th.c ? "primary" : null,
+      c.title + " (" + c.events.length + " steps)");
+    b.onclick = () => { th.c = i; th.step = 0; render(); };
+    sel.appendChild(b);
+  });
+  pick.appendChild(sel);
+  pick.appendChild(el("p", "small mut",
+    "Every value below is what the pipeline actually produced on " +
+    DATA.built_at + " with " + DATA.model + " — captured by wrapping the " +
+    "real methods, not re-implemented. The conversations are written for " +
+    "this demo; no customer data is shown. Values are shown translated — " +
+    "tick “Show 中文 original” in the header for exactly what the " +
+    "pipeline produced. Navigate with ◀ ▶ or arrow keys."));
+  s.appendChild(pick);
+
+  const c = DATA.cases[th.c];
+  const cur = Math.min(th.step, c.events.length - 1);
+  const ev = c.events[cur];
+
+  const logCard = el("div", "card");
+  logCard.appendChild(el("h3", null, "Input conversation"));
+  logCard.appendChild(el("p", "small mut", c.note));
+  const lg = el("div", "rowout");
+  lg.appendChild(pii(T(c, "raw_log").trim()));
+  logCard.appendChild(lg);
+  s.appendChild(logCard);
+
+  const flowCard = el("div", "card");
+  flowCard.appendChild(el("h3", null, "Where we are"));
+  flowCard.appendChild(buildFlow(STAGE_NODE[ev.stage]));
+  const dots = el("div", "dots");
+  c.events.forEach((x, i) => {
+    const d = el("div", "dot" + (i === cur ? " on" : i < cur ? " done" : ""),
+      String(i + 1));
+    d.title = STAGE_LABEL[x.stage] || x.stage;
+    d.onclick = () => { th.step = i; render(); };
+    dots.appendChild(d);
+  });
+  flowCard.appendChild(dots);
+  const ctr = el("div", "controls");
+  const prev = el("button", null, "◀ Prev");
+  prev.disabled = cur === 0;
+  prev.onclick = () => { th.step = cur - 1; render(); };
+  const next = el("button", "primary", "Next ▶");
+  next.disabled = cur === c.events.length - 1;
+  next.onclick = () => { th.step = cur + 1; render(); };
+  ctr.appendChild(prev); ctr.appendChild(next);
+  ctr.appendChild(el("span", "small mut",
+    "  step " + (cur + 1) + " / " + c.events.length));
+  flowCard.appendChild(ctr);
+  s.appendChild(flowCard);
+
+  const det = el("div", "card");
+  const h = el("h2");
+  h.appendChild(document.createTextNode(STAGE_LABEL[ev.stage] || ev.stage));
+  if (ev.status) { h.appendChild(document.createTextNode(" ")); h.appendChild(badge(ev.status)); }
+  det.appendChild(h);
+
+  if (ev.stage === "row") {
+    det.appendChild(ioRow("IN", T(ev, "inp"), true));
+    const grid = el("table", "t");
+    const hr2 = el("tr");
+    ["#", "Column", "Value"].forEach(x => hr2.appendChild(el("th", null, x)));
+    grid.appendChild(hr2);
+    DATA.columns.forEach((col, i) => {
+      const tr = el("tr");
+      tr.appendChild(el("td", "mut", String.fromCharCode(65 + i)));
+      tr.appendChild(el("td", null, col));
+      const td = el("td", "io-mono");
+      td.appendChild(pii(T(ev, "out")[i] || "—"));
+      tr.appendChild(td);
+      grid.appendChild(tr);
+    });
+    det.appendChild(grid);
+  } else {
+    det.appendChild(ioRow("IN", T(ev, "inp"),
+      ["extract", "recall", "dedup", "option"].includes(ev.stage)));
+    det.appendChild(ioRow("OUT", T(ev, "out"), true));
+  }
+  det.appendChild(el("div", "narr", narration(ev)));
+  s.appendChild(det);
+
+  if (cur === c.events.length - 1) {
+    const done = el("div", "card");
+    done.appendChild(el("h3", null,
+      "Result — " + c.orders.length + " order" +
+      (c.orders.length === 1 ? "" : "s") + " extracted"));
+    const tb = el("table", "t");
+    const hr3 = el("tr");
+    ["Recipient", "Item", "Ship date", "Status"].forEach(x =>
+      hr3.appendChild(el("th", null, x)));
+    tb.appendChild(hr3);
+    c.orders.forEach(o => {
+      const tr = el("tr");
+      const od = showZh ? o.order : (o.order_en || o.order);
+      const td0 = el("td"); td0.appendChild(pii(od.receiver_name));
+      tr.appendChild(td0);
+      tr.appendChild(el("td", null, od.giftbox || od.family || "—"));
+      tr.appendChild(el("td", null, od.shipping_date || "—"));
+      const td3 = el("td"); td3.appendChild(badge(o.status));
+      tr.appendChild(td3);
+      tb.appendChild(tr);
+    });
+    done.appendChild(tb);
+    s.appendChild(done);
+  }
+
+  const sum = el("div", "card");
+  sum.appendChild(el("h3", null, "Packing summary across both runs"));
+  sum.appendChild(el("p", "small mut",
+    "What organize_by_date.py appends under each delivery-date tab. " +
+    "\"N addresses\" counts order rows, not distinct addresses — one row is " +
+    "one shipment, so two orders to the same address still need two parcels."));
+  const out = el("div", "rowout");
+  const totals = showZh ? DATA.summary.totals : DATA.summary.totals_en;
+  out.textContent = DATA.summary.lines.map(l => T(l, "text")).join("\n") +
+    "\n── " + DATA.summary.order_count + " orders / " +
+    Object.entries(totals).map(([u, n]) => n + " " + u).join(" / ");
+  sum.appendChild(out);
+  s.appendChild(sum);
+
+  return s;
+}
+
+/* ── shell ── */
+function render() {
+  showZh = document.getElementById("zh").checked;
+  const nav = document.getElementById("nav");
+  nav.textContent = "";
+  PAGES.forEach((p, i) => {
+    const b = el("button", i === page ? "on" : null, p);
+    b.onclick = () => { page = i; render(); };
+    nav.appendChild(b);
+  });
+  const main = document.getElementById("main");
+  main.textContent = "";
+  const s = page === 0 ? pageOverview() : pageTheater();
+  s.classList.add("on");
+  main.appendChild(s);
+  document.body.classList.toggle("masked",
+    document.getElementById("mask").checked);
+}
+
+document.getElementById("mask").onchange = render;
+document.getElementById("zh").onchange = render;
+document.addEventListener("keydown", e => {
+  if (page !== 1) return;
+  const n = DATA.cases[th.c].events.length;
+  if (e.key === "ArrowRight") { th.step = Math.min(th.step + 1, n - 1); render(); }
+  if (e.key === "ArrowLeft") { th.step = Math.max(th.step - 1, 0); render(); }
+});
+render();
+</script>
+</body>
+</html>
