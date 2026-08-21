@@ -236,3 +236,87 @@ def test_offday_text_contains_every_order():
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+# ─────────────────────── 出貨日早於填表時間 ───────────────────────
+
+
+def make_row_with_timestamp(shipping_date: str, submitted: str,
+                            receiver: str = '王小明') -> list:
+    row = make_row(shipping_date, receiver=receiver)
+    row[0] = submitted
+    return row
+
+
+def test_backdated_order_is_flagged():
+    """填表當下出貨日就已經過去了，一定是填錯"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/16', '2026/08/20 10:00:00', receiver='填錯的'),
+    ])
+    result = auditor.audit(include_past=True)
+    assert result['backdated_count'] == 1
+    order = result['backdated'][0]
+    assert order.receiver_name == '填錯的'
+    assert order.shipping_date == '2026-08-16'
+    assert order.submitted_label == '2026-08-20'
+
+
+def test_normal_order_is_not_backdated():
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/26', '2026/08/20 10:00:00'),
+    ])
+    assert auditor.audit(include_past=True)['backdated_count'] == 0
+
+
+def test_same_day_shipping_is_not_backdated():
+    """當天下單當天出貨不算填錯"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/26', '2026/08/26 08:00:00'),
+    ])
+    assert auditor.audit(include_past=True)['backdated_count'] == 0
+
+
+def test_backdated_ignores_include_past_filter():
+    """backdated 必然早於今天，被 include_past 濾掉的話預設就永遠看不到"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/16', '2026/08/20 10:00:00'),
+    ])
+    result = auditor.audit(include_past=False, today=date(2026, 8, 21))
+    assert result['backdated_count'] == 1, 'backdated 不該被 include_past 過濾掉'
+
+
+def test_backdated_and_offday_can_both_apply():
+    """同一列可能兩種毛病都有，兩邊都要出現"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/18', '2026/08/20 10:00:00'),   # 週二 且 早於填表
+    ])
+    result = auditor.audit(include_past=True)
+    assert result['backdated_count'] == 1
+    assert result['offday_count'] == 1
+
+
+def test_unparseable_timestamp_skips_the_check():
+    """時間戳記看不懂就不做比對，不能誤報"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/16', '亂寫的時間'),
+    ])
+    assert auditor.audit(include_past=True)['backdated_count'] == 0
+
+
+def test_backdated_appears_in_embed_and_text():
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/16', '2026/08/20 10:00:00', receiver='填錯的'),
+    ])
+    result = auditor.audit(include_past=False, today=date(2026, 8, 21))
+    embed, _ = fmt.offday_embed(result)
+    assert any('早於填表時間' in f.name for f in embed.fields)
+    assert '填錯的' in fmt.offday_text(result)
+
+
+def test_clean_sheet_reports_no_problems():
+    """三類都沒有才算乾淨"""
+    auditor = make_auditor([
+        make_row_with_timestamp('2026/8/26', '2026/08/20 10:00:00'),
+    ])
+    embed, _ = fmt.offday_embed(auditor.audit(include_past=True))
+    assert '沒有出貨日異常' in embed.title

@@ -218,7 +218,7 @@ class ChatLogImporter:
         if family and not FAMILY_OPTIONS_CONFIRMED:
             problems.append('家庭號選項字串尚未和 Google 表單核對過，請確認後再寫入')
 
-        shipping_date = self._resolve_shipping_date(raw.get('shipping_date'), problems)
+        shipping_date = self._resolve_shipping_date(raw.get('shipping_date'), problems, moment)
 
         # 必填欄位檢查
         if not receiver_name:
@@ -315,14 +315,16 @@ class ChatLogImporter:
             problems.append(f'{label}找不到對應選項：{spec} {count}{unit}')
         return option
 
-    def _resolve_shipping_date(self, value: Any, problems: List[str]) -> str:
+    def _resolve_shipping_date(self, value: Any, problems: List[str],
+                               moment: datetime) -> str:
         with tracing.trace('resolve-shipping-date', input_data={'raw': value}) as span:
             before = len(problems)
-            result = self._resolve_shipping_date_inner(value, problems)
+            result = self._resolve_shipping_date_inner(value, problems, moment)
             span.update(output=result, metadata={'issues': problems[before:]})
             return result
 
-    def _resolve_shipping_date_inner(self, value: Any, problems: List[str]) -> str:
+    def _resolve_shipping_date_inner(self, value: Any, problems: List[str],
+                                     moment: datetime) -> str:
         text = _text(value)
         if not text:
             problems.append('缺少配送日期')
@@ -343,6 +345,12 @@ class ChatLogImporter:
         if not is_shipping_day(parsed):
             problems.append(f'配送日 {text} 是星期{weekday_name(parsed)}，'
                             f'不是出貨日（僅{shipping_days_text()}）')
+
+        # 出貨日早於今天：多半是模型把「上週三」之類的相對日期算錯年份或算到過去，
+        # 也可能是客人真的在講已經出過的那批。只標記不擋，補登舊訂單時還是寫得進去。
+        if parsed.date() < moment.date():
+            problems.append(f'配送日 {parsed.strftime("%Y-%m-%d")} 已經過去'
+                            f'（今天 {moment.strftime("%Y-%m-%d")}）')
 
         return parsed.strftime('%Y-%m-%d')
 
