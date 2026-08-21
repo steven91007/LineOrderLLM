@@ -31,7 +31,7 @@
 
 ```bash
 # 安裝相依套件
-pip install -r requirements.txt
+uv sync
 
 # 複製環境變數範本
 cp .env.example .env
