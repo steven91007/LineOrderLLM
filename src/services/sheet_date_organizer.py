@@ -100,14 +100,14 @@ class SheetDateOrganizer:
         # 出貨日已經過去的分頁鎖定不動：貨已經出了，那份清單就是歷史紀錄，
         # 不該再跟著總表變動。之後就算有人改了總表的舊訂單，也不會蓋掉出貨當下的樣子。
         today = today or date.today()
-        locked = [name for name in groups if _is_past_sheet(name, today)]
+        locked = [name for name in groups if is_past_sheet(name, today)]
 
         # 訂單改了配送日期之後，原本那天的分頁會變成沒有來源的殘留資料。
         # 日期分頁是總表的投影，留著就是錯的，所以要一併清空。
         # 但已出貨的分頁不算殘留——它本來就不該再有對應的訂單。
         stale = [name for name in existing
                  if is_date_sheet(name) and name not in groups
-                 and not _is_past_sheet(name, today)]
+                 and not is_past_sheet(name, today)]
 
         result = {
             'success': True,
