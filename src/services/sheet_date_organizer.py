@@ -18,7 +18,7 @@
 import logging
 import re
 from collections import OrderedDict
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from googleapiclient.errors import HttpError
@@ -61,7 +61,8 @@ class SheetDateOrganizer:
         self.sheet_id = sheet_id
         self.source_sheet = self.client.sheet_name
 
-    def organize(self, dry_run: bool = True) -> Dict[str, Any]:
+    def organize(self, dry_run: bool = True,
+                 today: Optional[date] = None) -> Dict[str, Any]:
         """讀總表、依日期分組，並（在 dry_run=False 時）寫回各日期分頁
 
         Args:
@@ -96,10 +97,17 @@ class SheetDateOrganizer:
         except HttpError as error:
             return {'success': False, 'error': f'讀取分頁清單失敗：{error}'}
 
+        # 出貨日已經過去的分頁鎖定不動：貨已經出了，那份清單就是歷史紀錄，
+        # 不該再跟著總表變動。之後就算有人改了總表的舊訂單，也不會蓋掉出貨當下的樣子。
+        today = today or date.today()
+        locked = [name for name in groups if _is_past_sheet(name, today)]
+
         # 訂單改了配送日期之後，原本那天的分頁會變成沒有來源的殘留資料。
         # 日期分頁是總表的投影，留著就是錯的，所以要一併清空。
+        # 但已出貨的分頁不算殘留——它本來就不該再有對應的訂單。
         stale = [name for name in existing
-                 if is_date_sheet(name) and name not in groups]
+                 if is_date_sheet(name) and name not in groups
+                 and not _is_past_sheet(name, today)]
 
         result = {
             'success': True,
@@ -109,6 +117,7 @@ class SheetDateOrganizer:
             'total_rows': sum(len(v) for v in groups.values()),
             'written_sheets': [],
             'stale_sheets': stale,
+            'locked_sheets': locked,
             'dry_run': dry_run,
         }
 
@@ -123,6 +132,12 @@ class SheetDateOrganizer:
 
             for sheet_name, data_rows in groups.items():
                 meta = existing.get(sheet_name) or self._create_sheet(sheet_name)
+
+                if sheet_name in locked:
+                    # 已出貨：內容維持原樣，只確保保護還在
+                    self._protect_sheet(sheet_name, meta)
+                    continue
+
                 self._replace_sheet_content(
                     sheet_name, header, data_rows,
                     summary_rows(summaries[sheet_name], sheet_name),
@@ -163,7 +178,8 @@ class SheetDateOrganizer:
         """
         spreadsheet = self.service.spreadsheets().get(
             spreadsheetId=self.sheet_id,
-            fields='sheets(properties(sheetId,title),bandedRanges(bandedRangeId))',
+            fields=('sheets(properties(sheetId,title),bandedRanges(bandedRangeId),'
+                    'protectedRanges(protectedRangeId,description))'),
         ).execute()
 
         sheets = OrderedDict()
@@ -172,6 +188,7 @@ class SheetDateOrganizer:
             sheets[props['title']] = {
                 'id': props['sheetId'],
                 'bandings': [b['bandedRangeId'] for b in sheet.get('bandedRanges', [])],
+                'protections': [r['protectedRangeId'] for r in sheet.get('protectedRanges', [])],
             }
         return sheets
 
@@ -253,6 +270,35 @@ class SheetDateOrganizer:
             for reply in response.get('replies', []) if 'addBanding' in reply
         ]
 
+    def _protect_sheet(self, sheet_name: str, meta: Dict[str, Any]) -> None:
+        """替已出貨的日期分頁加上保護
+
+        用 warningOnly：編輯時 Google 會跳「你正在編輯受保護的儲存格」確認框，
+        擋得住手滑，但不會把任何人（包含這支程式用的服務帳號）鎖在外面。
+        改成限制編輯者的話，服務帳號有可能反而失去寫入權限，之後要解鎖會很麻煩。
+        """
+        if meta.get('protections'):
+            return  # 已經保護過了，重複加會變成一堆重疊的保護範圍
+
+        try:
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=self.sheet_id,
+                body={'requests': [{
+                    'addProtectedRange': {
+                        'protectedRange': {
+                            'range': {'sheetId': meta['id']},
+                            'description': f'{sheet_name} 已出貨，內容鎖定',
+                            'warningOnly': True,
+                        }
+                    }
+                }]},
+            ).execute()
+            meta.setdefault('protections', []).append(True)
+            logger.info(f'鎖定已出貨的日期分頁：{sheet_name}')
+        except HttpError as error:
+            # 鎖不起來不該讓整批整理失敗，記錄下來就好
+            logger.warning(f'鎖定分頁 {sheet_name} 失敗：{error}')
+
     def _clear_sheet(self, sheet_name: str) -> None:
         """清空分頁內容（統計區塊只佔 A 欄，清除範圍仍用 A:L 蓋掉整片舊內容）"""
         self.service.spreadsheets().values().clear(
@@ -276,6 +322,13 @@ class SheetDateOrganizer:
             body={'values': [header] + data_rows + (extra_rows or []),
                   'majorDimension': 'ROWS'},
         ).execute()
+
+
+def is_past_sheet(sheet_name: str, today: date) -> bool:
+    """分頁的日期是不是已經過去了（今天當天不算）"""
+    if not DATE_SHEET_PATTERN.match(sheet_name):
+        return False  # 未指定日期之類的非日期分頁，永遠不鎖
+    return datetime.strptime(sheet_name, '%Y-%m-%d').date() < today
 
 
 def normalize_sheet_date(value: Any) -> Optional[str]:
@@ -305,6 +358,7 @@ def is_date_sheet(sheet_name: str) -> bool:
 
 __all__ = [
     'SheetDateOrganizer',
+    'is_past_sheet',
     'normalize_sheet_date',
     'is_date_sheet',
     'UNDATED_SHEET_NAME',

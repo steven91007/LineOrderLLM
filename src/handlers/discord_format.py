@@ -345,6 +345,7 @@ def organize_preview_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optio
     groups = result.get('groups') or {}
     summaries = result.get('summaries') or {}
     stale = result.get('stale_sheets') or []
+    locked = set(result.get('locked_sheets') or [])
 
     embed = discord.Embed(
         title='日期分頁整理預覽',
@@ -360,7 +361,7 @@ def organize_preview_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optio
         if shown >= ORGANIZE_FIELD_LIMIT or len(embed) > MAX_CHARS_PER_MESSAGE:
             break
         embed.add_field(
-            name=_sheet_field_name(sheet_name, len(rows)),
+            name=_sheet_field_name(sheet_name, len(rows), sheet_name in locked),
             value=truncate(_summary_value(summaries.get(sheet_name)), 1024),
             inline=False,
         )
@@ -382,13 +383,23 @@ def organize_preview_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optio
             inline=False,
         )
 
+    if locked:
+        embed.add_field(
+            name=f'🔒 已鎖定的分頁（{len(locked)}）',
+            value='出貨日已經過去，內容維持原樣不會重建；'
+                  '在試算表上手動編輯時 Google 會跳出保護提醒。',
+            inline=False,
+        )
+
     embed.set_footer(text='按下「確認寫入」時會重新讀取總表，實際結果以寫入後為準')
     return embed, overflow
 
 
-def _sheet_field_name(sheet_name: str, row_count: int) -> str:
-    from src.services.sheet_date_organizer import UNDATED_SHEET_NAME
+def _sheet_field_name(sheet_name: str, row_count: int, is_locked: bool = False) -> str:
+    from ..services.sheet_date_organizer import UNDATED_SHEET_NAME
 
+    if is_locked:
+        return truncate(f'🔒 {sheet_name}　{row_count} 筆（已出貨，不會重建）', 256)
     mark = '⚠️ ' if sheet_name == UNDATED_SHEET_NAME else ''
     return truncate(f'{mark}{sheet_name}　{row_count} 筆', 256)
 
@@ -422,8 +433,9 @@ def organize_preview_text(result: Dict[str, Any]) -> str:
         f'共 {result.get("total_rows", 0)} 筆訂單，分成 {len(groups)} 個分頁：',
         '',
     ]
+    locked = set(result.get('locked_sheets') or [])
     for sheet_name, rows in groups.items():
-        lines.append(_sheet_field_name(sheet_name, len(rows)))
+        lines.append(_sheet_field_name(sheet_name, len(rows), sheet_name in locked))
         for line in _summary_value(summaries.get(sheet_name)).split('\n'):
             lines.append(f'      {line}')
         lines.append('')
@@ -470,9 +482,12 @@ def organize_result_embed(result: Dict[str, Any]) -> discord.Embed:
             )
         return embed
 
+    locked = result.get('locked_sheets') or []
     description = f'已寫入 {len(written)} 個分頁'
     if stale:
         description += f'，清空 {len(stale)} 個'
+    if locked:
+        description += f'，鎖定 {len(locked)} 個（已出貨）'
 
     embed = discord.Embed(title='✅ 日期分頁整理完成', description=description, color=0x2ECC71)
     if written:
@@ -492,11 +507,13 @@ def offday_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
 
     offday = result.get('offday') or {}
     unknown = result.get('unknown') or []
+    backdated = result.get('backdated') or []
     offday_count = result.get('offday_count', 0)
     unknown_count = result.get('unknown_count', 0)
+    backdated_count = result.get('backdated_count', 0)
     scope = '整張總表' if result.get('include_past') else '今天以後'
 
-    if not offday_count and not unknown_count:
+    if not offday_count and not unknown_count and not backdated_count:
         embed = discord.Embed(
             title='✅ 沒有出貨日異常的訂單',
             description=(f'來源分頁：{result.get("source_sheet") or "—"}\n'
@@ -511,7 +528,8 @@ def offday_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
         title='⚠️ 出貨日需要處理的訂單',
         description=(f'來源分頁：{result.get("source_sheet") or "—"}\n'
                      f'掃描範圍：{scope}，共 {result.get("total_rows", 0)} 筆訂單\n'
-                     f'非出貨日 {offday_count} 筆　日期無法辨識 {unknown_count} 筆'),
+                     f'非出貨日 {offday_count} 筆　日期無法辨識 {unknown_count} 筆　'
+                     f'早於填表時間 {backdated_count} 筆'),
         color=0xE67E22,
     )
 
@@ -546,6 +564,15 @@ def offday_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
         if len(unknown) > 15 and overflow is None:
             overflow = offday_text(result)
 
+    if backdated:
+        embed.add_field(
+            name=f'⏮ 出貨日早於填表時間　{len(backdated)} 筆',
+            value=truncate('\n'.join(_backdated_line(o) for o in backdated[:15]), 1024),
+            inline=False,
+        )
+        if len(backdated) > 15 and overflow is None:
+            overflow = offday_text(result)
+
     _add_skipped_past_note(embed, result)
     embed.set_footer(text='列號對應總表上的實際列，可以直接跳過去改')
     return embed, overflow
@@ -571,15 +598,23 @@ def _unknown_line(order: Any) -> str:
     return f'第{order.row_number}列　{order.receiver_name or "—"}　原文：{truncate(raw, 40)}'
 
 
+def _backdated_line(order: Any) -> str:
+    return (f'第{order.row_number}列　{order.receiver_name or "—"}　'
+            f'出貨日 {order.shipping_date}　填表 {order.submitted_label}')
+
+
 def offday_text(result: Dict[str, Any]) -> str:
     """完整的純文字版，筆數太多時當附件"""
     offday = result.get('offday') or {}
     unknown = result.get('unknown') or []
+    backdated = result.get('backdated') or []
 
     lines = [
         f'來源分頁：{result.get("source_sheet") or "—"}',
         f'共 {result.get("total_rows", 0)} 筆訂單',
-        f'非出貨日 {result.get("offday_count", 0)} 筆、日期無法辨識 {result.get("unknown_count", 0)} 筆',
+        f'非出貨日 {result.get("offday_count", 0)} 筆、'
+        f'日期無法辨識 {result.get("unknown_count", 0)} 筆、'
+        f'早於填表時間 {result.get("backdated_count", 0)} 筆',
         '',
     ]
 
@@ -595,5 +630,12 @@ def offday_text(result: Dict[str, Any]) -> str:
         for order in unknown:
             lines.append(f'   第{order.row_number}列　{order.receiver_name or "—"}　'
                          f'{order.receiver_phone}　原文：{order.raw_date or "（空白）"}')
+        lines.append('')
+
+    if backdated:
+        lines.append(f'── 出貨日早於填表時間　{len(backdated)} 筆')
+        for order in backdated:
+            lines.append(f'   第{order.row_number}列　{order.receiver_name or "—"}　'
+                         f'出貨日 {order.shipping_date}　填表 {order.submitted_label}')
 
     return '\n'.join(lines)
