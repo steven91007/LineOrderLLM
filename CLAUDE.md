@@ -53,12 +53,12 @@
 - Fallback 機制確保穩定性
 - **保留地址備註**：如 `(XXX工地)`、`(XXX公司)` 等括號內容
 
-#### DSPy 商品解析模組  
-- `ItemParserSignature`：定義商品項目解析格式
-- `ItemParser`：DSPy 模組，解析商品文字為結構化資料
-- **保留產品編號**：如 `18A禮盒`、`16A蛋糕`、`20A花束` 等
-- 支援各種數量表達方式：`x2`、`兩個`、`3盒` 等
-- 處理多商品組合：`18A禮盒 x1, 16A蛋糕 x3`
+#### DSPy 聊天紀錄解析模組
+- `ChatLogOrderSignature`：從 LINE 聊天紀錄抽出所有成立的訂單
+- `ChatLogParser`：DSPy 模組，兩段式解析（先抽取、再複查有無漏單）
+- 品項必須對到 `src/utils/form_options.py` 的表單下拉選項字串，不讓模型自由發揮
+- 早期的 `ItemParser` / `MultiParser` / `SingleParser` / `OrderClassifier` 已於
+  2026-08-21 移除，改由 `ChatLogParser` 統一處理
 
 ## Agent skills
 
