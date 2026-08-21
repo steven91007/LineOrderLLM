@@ -478,3 +478,122 @@ def organize_result_embed(result: Dict[str, Any]) -> discord.Embed:
     if written:
         embed.add_field(name='分頁', value=truncate('、'.join(written), 1024), inline=False)
     return embed
+
+
+# ─────────────────────── 非出貨日稽核 ───────────────────────
+
+
+def offday_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
+    """/offday 的結果
+
+    回傳 (embed, 附件文字)。筆數太多塞不進 embed 時，附件文字才不是 None。
+    """
+    from ..utils.shipping_days import shipping_days_text
+
+    offday = result.get('offday') or {}
+    unknown = result.get('unknown') or []
+    offday_count = result.get('offday_count', 0)
+    unknown_count = result.get('unknown_count', 0)
+    scope = '整張總表' if result.get('include_past') else '今天以後'
+
+    if not offday_count and not unknown_count:
+        embed = discord.Embed(
+            title='✅ 沒有出貨日異常的訂單',
+            description=(f'來源分頁：{result.get("source_sheet") or "—"}\n'
+                         f'掃描範圍：{scope}，共 {result.get("total_rows", 0)} 筆訂單\n'
+                         f'全部都落在{shipping_days_text()}。'),
+            color=0x2ECC71,
+        )
+        _add_skipped_past_note(embed, result)
+        return embed, None
+
+    embed = discord.Embed(
+        title='⚠️ 出貨日需要處理的訂單',
+        description=(f'來源分頁：{result.get("source_sheet") or "—"}\n'
+                     f'掃描範圍：{scope}，共 {result.get("total_rows", 0)} 筆訂單\n'
+                     f'非出貨日 {offday_count} 筆　日期無法辨識 {unknown_count} 筆'),
+        color=0xE67E22,
+    )
+
+    overflow: Optional[str] = None
+    shown = 0
+
+    for shipping_date, orders in offday.items():
+        if shown >= ORGANIZE_FIELD_LIMIT or len(embed) > MAX_CHARS_PER_MESSAGE:
+            break
+        label = orders[0].weekday_label
+        embed.add_field(
+            name=truncate(f'{shipping_date}（{label}）　{len(orders)} 筆', 256),
+            value=truncate('\n'.join(_offday_line(o) for o in orders), 1024),
+            inline=False,
+        )
+        shown += 1
+
+    if shown < len(offday):
+        embed.add_field(
+            name=f'其餘 {len(offday) - shown} 個日期',
+            value=truncate('、'.join(list(offday)[shown:]), 1024),
+            inline=False,
+        )
+        overflow = offday_text(result)
+
+    if unknown:
+        embed.add_field(
+            name=f'❓ 日期無法辨識　{len(unknown)} 筆',
+            value=truncate('\n'.join(_unknown_line(o) for o in unknown[:15]), 1024),
+            inline=False,
+        )
+        if len(unknown) > 15 and overflow is None:
+            overflow = offday_text(result)
+
+    _add_skipped_past_note(embed, result)
+    embed.set_footer(text='列號對應總表上的實際列，可以直接跳過去改')
+    return embed, overflow
+
+
+def _add_skipped_past_note(embed: discord.Embed, result: Dict[str, Any]) -> None:
+    skipped = result.get('skipped_past', 0)
+    if skipped:
+        embed.add_field(
+            name='已略過',
+            value=f'{skipped} 筆出貨日已經過去（加上 all:true 可以一起列出來）',
+            inline=False,
+        )
+
+
+def _offday_line(order: Any) -> str:
+    phone = f'　{order.receiver_phone}' if order.receiver_phone else ''
+    return f'第{order.row_number}列　{order.receiver_name or "—"}{phone}　{order.items}'
+
+
+def _unknown_line(order: Any) -> str:
+    raw = order.raw_date or '（空白）'
+    return f'第{order.row_number}列　{order.receiver_name or "—"}　原文：{truncate(raw, 40)}'
+
+
+def offday_text(result: Dict[str, Any]) -> str:
+    """完整的純文字版，筆數太多時當附件"""
+    offday = result.get('offday') or {}
+    unknown = result.get('unknown') or []
+
+    lines = [
+        f'來源分頁：{result.get("source_sheet") or "—"}',
+        f'共 {result.get("total_rows", 0)} 筆訂單',
+        f'非出貨日 {result.get("offday_count", 0)} 筆、日期無法辨識 {result.get("unknown_count", 0)} 筆',
+        '',
+    ]
+
+    for shipping_date, orders in offday.items():
+        lines.append(f'── {shipping_date}（{orders[0].weekday_label}）　{len(orders)} 筆')
+        for order in orders:
+            lines.append(f'   第{order.row_number}列　{order.receiver_name or "—"}　'
+                         f'{order.receiver_phone}　{order.items}　訂購人：{order.orderer or "—"}')
+        lines.append('')
+
+    if unknown:
+        lines.append(f'── 日期無法辨識　{len(unknown)} 筆')
+        for order in unknown:
+            lines.append(f'   第{order.row_number}列　{order.receiver_name or "—"}　'
+                         f'{order.receiver_phone}　原文：{order.raw_date or "（空白）"}')
+
+    return '\n'.join(lines)
