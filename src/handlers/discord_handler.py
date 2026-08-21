@@ -23,6 +23,7 @@ from discord.ext import tasks
 from . import discord_format as fmt
 from .discord_views import ImportConfirmView, OrganizeConfirmView
 from ..services.chat_log_importer import ChatLogImporter, ParsedOrder
+from ..services.offday_orders import OffdayOrderAuditor
 from ..services.sheet_date_organizer import SheetDateOrganizer
 from ..utils.time_utils import time_utils
 
@@ -135,6 +136,15 @@ class DiscordOrderHandler:
             raise RuntimeError('尚未解析過任何聊天紀錄')
         return self._importer.write(parsed_orders, include_review=include_review)
 
+    def _blocking_audit_offday(self, include_past: bool,
+                               source_sheet: Optional[str]) -> Dict[str, Any]:
+        auditor = OffdayOrderAuditor(
+            credentials_path=self.credentials_path,
+            sheet_id=self.sheet_id,
+            source_sheet=source_sheet,
+        )
+        return auditor.audit(include_past=include_past)
+
     def _blocking_organize(self, dry_run: bool, source_sheet: Optional[str]) -> Dict[str, Any]:
         organizer = SheetDateOrganizer(
             credentials_path=self.credentials_path,
@@ -155,6 +165,16 @@ class DiscordOrderHandler:
         async with self._import_lock, self._sheet_write_lock:
             return await self._run(self._import_pool, self._blocking_write,
                                    parsed_orders, include_review)
+
+    async def audit_offday(self, include_past: bool = False,
+                           source_sheet: Optional[str] = None) -> Dict[str, Any]:
+        """掃描總表找出出貨日不對的訂單
+
+        只讀不寫，所以不需要任何寫入鎖；借用 organize 的執行緒池是為了
+        沿用「googleapiclient 只在固定執行緒上跑」這個前提。
+        """
+        return await self._run(self._organize_pool, self._blocking_audit_offday,
+                               include_past, source_sheet)
 
     async def organize(self, dry_run: bool,
                        source_sheet: Optional[str] = None) -> Dict[str, Any]:
@@ -483,6 +503,34 @@ def setup_discord_handlers(bot, handler: DiscordOrderHandler) -> None:
                 io.BytesIO(overflow.encode('utf-8')), filename='日期分頁預覽.txt')
 
         view.message = await interaction.followup.send(**kwargs)
+
+    @bot.tree.command(name='offday', description='列出出貨日不是週三或週日的訂單')
+    @app_commands.describe(
+        all='連已經過去的出貨日一起列（預設只列今天以後）',
+        source='來源分頁名稱（預設「表單回覆 1」）',
+    )
+    @_guard()
+    async def offday_command(interaction: discord.Interaction,
+                             all: bool = False, source: Optional[str] = None):
+        await interaction.response.defer(thinking=True)
+
+        try:
+            result = await handler.audit_offday(include_past=all, source_sheet=source)
+        except Exception as error:
+            logger.exception('掃描非出貨日訂單失敗')
+            await interaction.followup.send(f'❌ 掃描失敗：{fmt.truncate(str(error), 500)}')
+            return
+
+        if not result.get('success'):
+            await interaction.followup.send(f'❌ {result.get("error")}')
+            return
+
+        embed, overflow = fmt.offday_embed(result)
+        kwargs = {'embed': embed}
+        if overflow:
+            kwargs['file'] = discord.File(
+                io.BytesIO(overflow.encode('utf-8')), filename='非出貨日訂單.txt')
+        await interaction.followup.send(**kwargs)
 
     @bot.tree.error
     async def on_tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
