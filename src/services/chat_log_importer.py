@@ -30,6 +30,7 @@ from ..utils.form_sheet_client import (
     format_timestamp,
 )
 from ..utils import langfuse_tracing as tracing
+from ..utils.shipping_days import is_shipping_day, shipping_days_text, weekday_name
 from ..utils.taiwan_address import TaiwanAddressNormalizer
 from ..utils.text_sanitizer import clean_field, strip_emoji
 from ..utils.time_utils import time_utils
@@ -49,12 +50,7 @@ def is_reasoning_model(model: str) -> bool:
     return bool(REASONING_MODEL_PATTERN.match(name))
 
 
-# 出貨日（Monday=0）。CONTEXT.md 寫的是「只有週三與週日出貨」，
-# 但 2026 這份表單的既有回覆裡出現過 2026/8/18（星期二），兩者對不上。
-# 這裡先照 CONTEXT.md 設定，落在非出貨日的訂單只會被標成需人工確認、不會被擋掉。
-# 若 2026 年的出貨日規則已經改了，改這個集合即可。
-SHIPPING_WEEKDAYS = {2, 6}
-
+# 出貨日的定義集中在 shipping_days.py，稽核工具（/offday）共用同一份
 
 @dataclass
 class ParsedOrder:
@@ -344,9 +340,9 @@ class ChatLogImporter:
             problems.append(f'配送日期格式無法辨識（{text}）')
             return text
 
-        if parsed.weekday() not in SHIPPING_WEEKDAYS:
-            weekday = '一二三四五六日'[parsed.weekday()]
-            problems.append(f'配送日 {text} 是星期{weekday}，不是出貨日（僅週三、週日）')
+        if not is_shipping_day(parsed):
+            problems.append(f'配送日 {text} 是星期{weekday_name(parsed)}，'
+                            f'不是出貨日（僅{shipping_days_text()}）')
 
         return parsed.strftime('%Y-%m-%d')
 
