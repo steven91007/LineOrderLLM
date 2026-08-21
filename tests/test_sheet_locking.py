@@ -154,5 +154,84 @@ def test_past_date_does_not_block_writing():
     assert parsed.status == 'review', '應該是需確認，不是被擋掉'
 
 
+# ─────────────────────── organize() 本身的路徑 ───────────────────────
+#
+# 上面那些測試只驗了 is_past_sheet 和排版，從來沒跑過 organize() 本身，
+# 所以 organize() 裡把函式名打錯（NameError）不會被抓到——實際上就發生過一次。
+# 這裡用假的 client 把 dry_run 那條路整條跑完。
+
+
+def make_organizer(sheet_names, existing=None):
+    """繞過 FormSheetClient，直接餵資料給 organize()"""
+    from src.services.sheet_date_organizer import SheetDateOrganizer
+    from src.utils.form_options import FORM_COLUMNS
+
+    rows = [list(FORM_COLUMNS)]
+    for name in sheet_names:
+        row = [''] * len(FORM_COLUMNS)
+        row[0] = '2026/08/20 10:00:00'
+        row[5] = '王小明'
+        row[8] = '20A 一盒 $1,150'
+        row[11] = name.replace('-', '/')      # 欲配送日期
+        rows.append(row)
+
+    organizer = SheetDateOrganizer.__new__(SheetDateOrganizer)
+
+    class _FakeClient:
+        sheet_name = '表單回覆 1'
+
+        def read_all_rows(self):
+            return rows
+
+    organizer.client = _FakeClient()
+    organizer.service = None
+    organizer.sheet_id = 'fake'
+    organizer.source_sheet = '表單回覆 1'
+    organizer._existing_sheets = lambda: {
+        n: {'id': i, 'bandings': [], 'protections': []}
+        for i, n in enumerate(existing or sheet_names)
+    }
+    return organizer
+
+
+def test_organize_dry_run_runs_end_to_end():
+    """這條路徑跑得完，就抓得到 organize() 裡的 NameError"""
+    organizer = make_organizer(['2026-08-19', '2026-08-23', '2026-08-26'])
+    result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
+    assert result['success']
+    assert result['total_rows'] == 3
+
+
+def test_organize_marks_past_sheets_as_locked():
+    organizer = make_organizer(['2026-08-19', '2026-08-23', '2026-08-26'])
+    result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
+    assert result['locked_sheets'] == ['2026-08-19']
+
+
+def test_organize_locks_nothing_when_all_upcoming():
+    organizer = make_organizer(['2026-08-23', '2026-08-26'])
+    result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
+    assert result['locked_sheets'] == []
+
+
+def test_organize_does_not_treat_past_sheets_as_stale():
+    """已出貨的分頁沒有對應訂單也不算殘留，不能被清空"""
+    organizer = make_organizer(
+        ['2026-08-26'],                        # 總表只剩這天有訂單
+        existing=['2026-08-19', '2026-08-26'],  # 但試算表上還有已出貨的 08-19
+    )
+    result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
+    assert '2026-08-19' not in result['stale_sheets'], '已出貨的分頁不該被清空'
+
+
+def test_organize_still_clears_genuinely_stale_upcoming_sheets():
+    """未出貨但已無訂單的分頁（客人改了日期），還是要清掉"""
+    organizer = make_organizer(
+        ['2026-08-26'],
+        existing=['2026-08-23', '2026-08-26'],
+    )
+    result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
+    assert result['stale_sheets'] == ['2026-08-23']
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
