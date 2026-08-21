@@ -7,11 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "dotenv>=0.9.9",
     "dspy>=2.6.27",
-    "fastapi>=0.116.1",
     "flask>=3.1.1",
-    "google>=3.0.0",
     "google-api-python-client>=2.177.0",
-    "httpx>=0.28.1",
     # LLM 追蹤（取代原本的 MLflow）
     "langfuse>=4.14.4",
     "openinference-instrumentation-dspy>=0.1.39",
@@ -20,5 +17,11 @@ dependencies = [
     "pydantic-settings>=2.10.1",
     "pytest>=8.4.1",
     "requests>=2.32.0",
-    "uvicorn>=0.35.0",
+    "jsonschema>=4.25.0",
+    "discord-py>=2.4",
 ]
+
+[tool.pytest.ini_options]
+# 測試從 repo 根目錄 import src.* 和 config，需要把根目錄放進 sys.path
+pythonpath = ["."]
+testpaths = ["tests"]
