@@ -24,6 +24,7 @@ jobs:
           key: ${{ secrets.GCP_VM_SSH_KEY }}
           script: |
             set -e
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
             cd ~/LineOrderLLM
             git pull
             uv sync
