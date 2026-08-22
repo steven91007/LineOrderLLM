@@ -50,6 +50,21 @@ def make_orders(ready: int = 0, review: int = 0, duplicate: int = 0, long_text: 
     return orders
 
 
+# ─────────────────────── LINE 推播 ───────────────────────
+
+
+def test_line_source_embed_contains_text_and_user_id():
+    embed = fmt.line_source_embed('U1234567890', '王小明 0912345678 20A一盒 台北市大安區某路1號')
+    assert '王小明' in embed.description
+    assert any(field.name == '傳送者 LINE user ID' and field.value == 'U1234567890'
+              for field in embed.fields)
+
+
+def test_line_source_embed_truncates_long_text():
+    embed = fmt.line_source_embed('U1', '長' * 5000)
+    assert len(embed.description) <= 4096
+
+
 # ─────────────────────── 狀態計數 ───────────────────────
 
 

@@ -17,14 +17,17 @@ MESSAGE CONTENT INTENT——沒開的話「丟 .txt 檔正常、貼文字沒反�
 """
 
 import argparse
+import asyncio
 import logging
 import sys
+import threading
 
 import discord
 from discord.ext import commands
 
 import config
 from src.handlers.discord_handler import DiscordOrderHandler, setup_discord_handlers
+from src.handlers.line_bridge_handler import create_line_bridge_app
 from src.utils import langfuse_tracing as tracing
 
 logging.basicConfig(level=logging.INFO)
@@ -63,6 +66,14 @@ def build_bot():
 
     bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
+    # LINE 訊息解析出訂單後私訊誰確認：優先用明確指定的，沒設就退回第一個
+    # 授權的 Discord 使用者（'*' 萬用字元不是一個實際的使用者 ID，不能拿來 fetch_user）。
+    notify_user_id = config.DISCORD_LINE_NOTIFY_USER_ID or None
+    if notify_user_id is None and config.DISCORD_AUTHORIZED_USERS:
+        first = config.DISCORD_AUTHORIZED_USERS[0]
+        if first != '*':
+            notify_user_id = int(first)
+
     handler = DiscordOrderHandler(
         api_key=config.DSPY_API_KEY,
         sheet_id=config.GOOGLE_SHEET_ID,
@@ -74,6 +85,7 @@ def build_bot():
         max_upload_bytes=config.DISCORD_MAX_UPLOAD_BYTES,
         ignore_prefix=config.DISCORD_IGNORE_PREFIX,
         min_chat_log_chars=config.DISCORD_MIN_CHAT_LOG_CHARS,
+        notify_user_id=notify_user_id,
     )
     setup_discord_handlers(bot, handler)
 
@@ -89,6 +101,25 @@ def build_bot():
             bot.tree.copy_global_to(guild=guild)
             await bot.tree.sync(guild=guild)
             logger.info('斜線指令已同步到伺服器 %s（立即生效）', config.DISCORD_GUILD_ID)
+
+        # LINE webhook 橋接：只有兩個變數都設定了才啟動，不影響純 Discord 部署
+        if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
+            if notify_user_id is None:
+                logger.warning(
+                    'LINE webhook 橋接已啟動，但沒有可通知的 Discord 使用者'
+                    '（DISCORD_AUTHORIZED_USERS 只有 "*"）：解析出的訂單不會私訊給任何人，'
+                    '請設定 DISCORD_LINE_NOTIFY_USER_ID')
+            loop = asyncio.get_running_loop()
+            line_app = create_line_bridge_app(handler, loop)
+            thread = threading.Thread(
+                target=line_app.run,
+                kwargs={'host': '0.0.0.0', 'port': config.PORT, 'use_reloader': False},
+                daemon=True,
+                name='line-bridge-flask',
+            )
+            thread.start()
+            logger.info('LINE webhook 橋接已啟動，port %s（通知對象 Discord user %s）',
+                       config.PORT, notify_user_id)
 
     bot.setup_hook = setup_hook
     bot._order_handler = handler

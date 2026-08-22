@@ -79,6 +79,20 @@ def _embed_length(embed: discord.Embed) -> int:
     return len(embed)
 
 
+# ─────────────────────────── LINE 推播 ───────────────────────────
+
+
+def line_source_embed(line_user_id: str, text: str) -> discord.Embed:
+    """LINE 客戶原始訊息的 embed，送在解析預覽前面，方便對照 LLM 抓得準不準"""
+    embed = discord.Embed(
+        title='📩 LINE 原始訊息',
+        description=truncate(text, 4096),
+        color=0x06C755,  # LINE 的品牌綠
+    )
+    embed.add_field(name='傳送者 LINE user ID', value=truncate(line_user_id, 1024), inline=False)
+    return embed
+
+
 # ─────────────────────────── 匯入預覽 ───────────────────────────
 
 
