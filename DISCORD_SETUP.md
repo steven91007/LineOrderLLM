@@ -198,6 +198,36 @@ LINE 的匯出檔通常遠超過 Discord 的 2000 字訊息上限，所以檔案
 
 ---
 
+## LINE 客戶訊息即時轉推播（選填）
+
+客人在 LINE 官方帳號傳訊息時，機器人會即時用 LLM 判斷是不是訂單，
+是的話私訊你（附原始訊息 + 解析預覽 + 確認按鈕），按下按鈕才寫入試算表。
+跟聊天紀錄匯入共用同一套解析、去重邏輯，只是來源和送達的介面不同。
+
+**要開啟這個功能**：`.env` 裡填好 `LINE_CHANNEL_ACCESS_TOKEN` 和 `LINE_CHANNEL_SECRET`
+（跟原本 LINE bot 用的是同一組），啟動 `discord_bot.py` 時就會自動一併起一個 Flask
+服務監聽 LINE webhook（同一個行程、同一個 port，見 `config.PORT`，預設 5000）。
+沒填這兩個變數的話完全不會啟動，不影響純 Discord 的用法。
+
+**要讓 LINE 打得到這個 webhook**：跟原本的 LINE bot 一樣，需要 Cloudflare Tunnel
+（見 `docs/cloudflare-tunnel.md`）把 `https://你的網域/callback` 接到這個 Flask 服務。
+GCE VM 上的完整部署步驟見 `docs/deploy-gcp.md`。
+
+**設定項**（都在 `.env`，見 `.env.example`）：
+
+| 變數 | 說明 |
+|---|---|
+| `DISCORD_LINE_NOTIFY_USER_ID` | 解析出訂單要私訊誰確認。留空＝退回 `DISCORD_AUTHORIZED_USERS` 第一個 |
+| `LINE_MIN_MESSAGE_CHARS` | 短於這個字數的訊息不解析（預設 5），濾掉「謝謝」之類不可能是訂單的訊息 |
+
+**行為細節**：
+
+- 沒解析出訂單（客人只是閒聊）就靜默結束，不會推播打擾你
+- 正在解析另一批訂單（不管是 Discord 貼的還是另一則 LINE 訊息）時，
+  這則訊息不會排隊，你會收到一則忙碌通知、附原文，自己到 LINE 看
+- 同一個人連續傳好幾則都成立訂單的話，新的一批會取代舊的未確認預覽
+  （跟 Discord 頻道裡的行為一樣，見上面「不會觸發解析的訊息」附近的說明）
+
 ## 疑難排解
 
 **私訊機器人沒反應**
