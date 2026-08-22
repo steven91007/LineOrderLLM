@@ -1,60 +1,38 @@
-# LINE Bot 配置說明
+# LineOrderLLM
 
-## 設置步驟
+用 LLM 解析 LINE 聊天紀錄，自動整理成訂單寫進 Google 試算表。
 
-### 1. 啟動應用程式和 ngrok 隧道
+目前**只用 Discord bot** 這個介面（LINE Bot 的 webhook 相關程式碼還在，但沒有部署使用）。
+
+## 快速開始
+
+1. 依照 [`DISCORD_SETUP.md`](DISCORD_SETUP.md) 設定 Discord 應用程式、取得 token、填好 `.env`
+2. 本機測試：
+
+   ```bash
+   uv run python discord_bot.py --check   # 檢查設定
+   uv run python discord_bot.py           # 啟動
+   ```
+
+3. 私訊機器人貼上聊天紀錄或丟 `.txt` 檔，就會解析成訂單，確認後寫入 Google 試算表
+
+## 部署與 CI/CD
+
+Discord bot 常駐在 GCE VM 上，push 到 `master` 會自動測試並部署，
+細節見 [`docs/deploy-gcp.md`](docs/deploy-gcp.md)。
+
+## 開發
 
 ```bash
-# 方法一：使用腳本啟動
-./start_ngrok.sh
-
-# 方法二：分別啟動
-# 終端1：啟動 Flask 應用
-python main.py
-
-# 終端2：啟動 ngrok
-ngrok http 5000
+uv sync           # 安裝依賴
+uv run pytest     # 跑測試
 ```
 
-### 2. 設定 LINE Bot Webhook URL
+其他文件：
 
-1. 啟動 ngrok 後，會看到類似這樣的輸出：
-   ```
-   Forwarding: https://xxxx-xx-xx-xx-xx.ngrok-free.app -> http://localhost:5000
-   ```
-
-2. 登入 [LINE Developers Console](https://developers.line.biz/)
-
-3. 選擇您的 Channel
-
-4. 在 Messaging API 標籤下找到 Webhook settings
-
-5. 設定 Webhook URL 為：
-   ```
-   https://xxxx-xx-xx-xx-xx.ngrok-free.app/callback
-   ```
-   （將 xxxx-xx-xx-xx-xx 替換為您的 ngrok URL）
-
-6. 啟用 "Use webhook"
-
-7. 點擊 "Verify" 測試連接
-
-### 3. 測試 LINE Bot
-
-1. 掃描 QR code 將 Bot 加為好友
-2. 發送訊息測試回音功能
-
-## 環境變數設定
-
-請確保 `.env` 檔案包含正確的設定：
-
-```
-LINE_CHANNEL_ACCESS_TOKEN=您的Channel Access Token
-LINE_CHANNEL_SECRET=您的Channel Secret
-```
-
-## 注意事項
-
-- ngrok 免費版的 URL 會在每次重啟時改變
-- 需要在 LINE Developers Console 更新新的 Webhook URL
-- 建議申請 ngrok 付費版以獲得固定 URL
+| 文件 | 內容 |
+|---|---|
+| [`DISCORD_SETUP.md`](DISCORD_SETUP.md) | Discord bot 設定與使用說明 |
+| [`docs/deploy-gcp.md`](docs/deploy-gcp.md) | 部署到 GCE + GitHub Actions CI/CD |
+| [`CONTEXT.md`](CONTEXT.md) | 專案背景與領域知識 |
+| [`CLAUDE.md`](CLAUDE.md) | 技術方針與開發記錄 |
