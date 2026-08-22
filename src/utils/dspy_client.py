@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 
 from .langfuse_tracing import init_tracing, observation, update_observation
+from .llm_model import build_lm, normalize_model_name
 from .taiwan_address import TaiwanAddressNormalizer
 
 from .dspy_modules.unified_parser import UnifiedOrderParser
@@ -29,7 +30,7 @@ class DSPyOrderClient:
             max_retries: 最大重試次數
         """
         self.api_key = api_key
-        self.model = model
+        self.model = normalize_model_name(model)
         self.max_retries = max_retries
         
         # 配置 DSPy
@@ -43,13 +44,8 @@ class DSPyOrderClient:
     
     def _configure_dspy(self):
         """配置 DSPy 設定"""
-        # 設定 OpenAI 作為語言模型
-        lm = dspy.LM(
-            model=self.model,
-            api_key=self.api_key,
-            max_tokens=2000,
-            temperature=0.1
-        )
+        # 設定 OpenAI 作為語言模型（前綴與推理型模型的參數由 build_lm 處理）
+        lm = build_lm(self.model, self.api_key, max_tokens=2000, temperature=0.1)
         dspy.settings.configure(lm=lm)
     
     def parse_order(self, order_text: str) -> Dict[str, Any]:
