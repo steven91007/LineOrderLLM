@@ -1,0 +1,15 @@
+[Unit]
+Description=Discord Order Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_VM_USER
+WorkingDirectory=/home/YOUR_VM_USER/LineOrderLLM
+ExecStart=/home/YOUR_VM_USER/.local/bin/uv run python discord_bot.py
+EnvironmentFile=/home/YOUR_VM_USER/LineOrderLLM/.env
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
