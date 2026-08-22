@@ -53,6 +53,31 @@ sudo systemctl enable --now discord-order-bot
 sudo journalctl -u discord-order-bot -f    # 確認正常啟動，Ctrl+C 離開
 ```
 
+**5.（選填）開啟 LINE 客戶訊息即時推播，需要再裝 Cloudflare Tunnel**
+
+這個功能讓 LINE 官方帳號收到客戶訊息時即時解析、私訊到 Discord 確認，
+細節見 `DISCORD_SETUP.md` 的「LINE 客戶訊息即時轉推播」。webhook 是跟
+discord bot 同一個行程、同一個 port（`config.PORT`，預設 5000），要讓 LINE
+連得到，照 `docs/cloudflare-tunnel.md` 裝 `cloudflared`，步驟跟 EC2 完全一樣
+（那份文件本來就是為這種常駐主機寫的）：
+
+```bash
+# 在 VM 上
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+sudo cloudflared service install   # 這步之前要先在本機做完 tunnel login / create / route dns
+sudo systemctl enable --now cloudflared
+```
+
+`cloudflared tunnel login` / `create` / `route dns` 這幾步需要互動登入，
+在自己電腦上做（見 `docs/cloudflare-tunnel.md` 步驟二、三），VM 上只需要
+`cloudflared/config.yml`（複製 `cloudflared/config.example.yml` 改好）和
+上面這幾行安裝／啟動指令。
+
+`.env` 記得補上 `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、
+`DISCORD_LINE_NOTIFY_USER_ID`。裝好後到 LINE Developers Console 把 Webhook URL
+設成 `https://你的網域/callback`，按 Verify 應該要回 200。
+
 ---
 
 ## 二、讓 GitHub Actions 能 SSH 進 VM

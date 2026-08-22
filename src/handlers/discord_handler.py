@@ -61,7 +61,8 @@ class DiscordOrderHandler:
                  max_upload_bytes: int = 1_048_576,
                  ignore_prefix: str = '#',
                  min_chat_log_chars: int = 20,
-                 normalize_addresses: bool = True):
+                 normalize_addresses: bool = True,
+                 notify_user_id: Optional[int] = None):
         self.api_key = api_key
         self.sheet_id = sheet_id
         self.credentials_path = credentials_path
@@ -73,6 +74,10 @@ class DiscordOrderHandler:
         self.ignore_prefix = ignore_prefix
         self.min_chat_log_chars = min_chat_log_chars
         self.normalize_addresses = normalize_addresses
+        # LINE 客戶訊息解析出訂單後要私訊誰確認，見 handle_line_message()
+        self.notify_user_id = notify_user_id
+        # setup_discord_handlers() 會補上，handle_line_message() 要用它 fetch_user/create_dm
+        self._bot = None
 
         # 各自一個 max_workers=1 的專屬執行緒池，不用 asyncio.to_thread。
         # to_thread 走共用 executor，每次會落在不同執行緒，而 ChatLogImporter 持有的
@@ -406,6 +411,86 @@ class DiscordOrderHandler:
             kwargs['file'] = attachment
         view.message = await channel.send(**kwargs)
 
+    # ─────────────────────── LINE 客戶訊息 ───────────────────────
+
+    async def _fetch_notify_user(self) -> discord.User:
+        user = self._bot.get_user(self.notify_user_id)
+        if user is not None:
+            return user
+        return await self._bot.fetch_user(self.notify_user_id)
+
+    async def handle_line_message(self, line_user_id: str, text: str) -> None:
+        """LINE 官方帳號收到客戶訊息時的進入點
+
+        由 line_bridge_handler.py 用 asyncio.run_coroutine_threadsafe() 從 Flask
+        的背景執行緒丟進 bot 的 event loop，不等待結果——LINE webhook 要求快速回應，
+        LLM 解析要幾十秒，不能卡在這裡。
+        """
+        if self.notify_user_id is None:
+            logger.warning('收到 LINE 訊息，但沒有設定要通知的 Discord 使用者，略過：%s', line_user_id)
+            return
+
+        if self._import_lock.locked():
+            try:
+                user = await self._fetch_notify_user()
+                channel = await user.create_dm()
+                await channel.send(
+                    f'⚠️ 目前正在解析另一批訂單，這則 LINE 訊息（使用者 {line_user_id}）'
+                    f'暫不解析，請自行到 LINE 查看：\n>>> {fmt.truncate(text, 1900)}')
+            except discord.HTTPException:
+                logger.exception('LINE 忙碌通知傳送失敗')
+            return
+
+        # 鎖的涵蓋範圍要跟 handle_message()/_parse_and_preview() 一致：整段
+        # 「解析 → 送出預覽」都要在鎖裡完成，理由見 _evict_channel_pending 的 docstring。
+        async with self._import_lock:
+            self._import_started_at = time.monotonic()
+            try:
+                parsed_orders = await self._run(self._import_pool, self._blocking_parse, text)
+            except Exception:
+                logger.exception('解析 LINE 訊息失敗：%s', line_user_id)
+                return
+            finally:
+                self._import_started_at = None
+
+            if not parsed_orders:
+                # 沒解析出訂單就靜默結束，不然每則客人閒聊都會推播騷擾你
+                return
+
+            try:
+                user = await self._fetch_notify_user()
+                channel = await user.create_dm()
+            except discord.HTTPException:
+                logger.exception('無法建立與 Discord 使用者的私訊頻道')
+                return
+
+            await self._evict_channel_pending(channel.id)
+
+            counts = fmt.count_statuses(parsed_orders)
+            pending = PendingImport(
+                token=uuid.uuid4().hex,
+                orders=parsed_orders,
+                user_id=self.notify_user_id,
+                channel_id=channel.id,
+                created_at=time.monotonic(),
+                counts=counts,
+            )
+
+            await channel.send(embed=fmt.line_source_embed(line_user_id, text))
+
+            source_label = f'LINE 訊息（使用者 {line_user_id}）'
+            summary = fmt.summary_embed(parsed_orders, counts, source_label, self.model, 0)
+            await channel.send(embed=summary)
+
+            for embeds in fmt.order_embeds(parsed_orders):
+                await channel.send(embeds=embeds)
+
+            view = ImportConfirmView(self, pending, timeout=self.confirm_timeout)
+            pending.view = view
+            self._pending[pending.token] = pending
+            view.message = await channel.send(
+                content='請確認是否要把這筆 LINE 訂單寫入試算表。', view=view)
+
     # ─────────────────────── 收尾 ───────────────────────
 
     def shutdown(self) -> None:
@@ -429,6 +514,8 @@ def setup_discord_handlers(bot, handler: DiscordOrderHandler) -> None:
 
     比照 liff_handler.py:270 的 setup_liff_routes(app, liff_handler)。
     """
+    # handle_line_message() 要用 bot 拿 Discord user、建私訊頻道
+    handler._bot = bot
 
     @bot.event
     async def on_ready():
