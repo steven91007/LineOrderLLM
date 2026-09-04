@@ -22,6 +22,9 @@ class PriceCalculator:
                     "價格": 2110,
                 }
             },
+            "雙雙對對": {  # 固定單價，不分規格
+                "雙雙對對": {"價格": 3400}
+            },
             "精選禮盒": {  # 一盒一層、每盒6顆
                 "18A 優惠首選": {
                     "重量範圍": "600g ~ 635g",
@@ -100,7 +103,11 @@ class PriceCalculator:
         
         # 去除空白字元，讓 "18 A" 變成 "18A"
         name = re.sub(r'\s+', '', name)
-        
+
+        # 雙雙對對：固定單價商品，不分 18A/20A 規格
+        if '雙雙對對' in name:
+            return {"type": "雙雙對對", "spec": "雙雙對對"}
+
         # 匹配 18A 或 20A 規格（包含空白的情況）
         spec_match = re.search(r'(18\s*A|20\s*A)', name, re.IGNORECASE)
         if not spec_match:
@@ -156,14 +163,22 @@ class PriceCalculator:
         
         spec_info = type_info[spec]
         
+        if product_type == "雙雙對對":
+            # 固定單價，直接按數量計算
+            unit_price = spec_info["價格"]
+            total_price = unit_price * quantity
+
+            detail = f"${unit_price} x {quantity}"
+            return total_price, detail
+
         if product_type == "家庭號":
             # 家庭號：直接按數量計算（一箱12顆）
             unit_price = spec_info["價格"]
             total_price = unit_price * quantity
-            
+
             detail = f"${unit_price}/箱 x {quantity}"
             return total_price, detail
-        
+
         elif product_type == "精選禮盒":
             # 精選禮盒：直接按盒數計算
             return self._calculate_giftbox_price(spec_info, quantity)
