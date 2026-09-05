@@ -36,6 +36,11 @@ _SHUANGSHUANG_PATTERN = re.compile(
     rf'^\s*{SHUANGSHUANG_LABEL}\s*([一二兩三四五六七八九十\d]+)\s*組'
 )
 
+# 表單選項還沒上架前，小編習慣直接手打「雙雙對對*數量」，也一併認得
+_SHUANGSHUANG_SHORTHAND_PATTERN = re.compile(
+    rf'^\s*{SHUANGSHUANG_LABEL}\s*\*\s*(\d+)\s*$'
+)
+
 _CHINESE_TO_INT = {
     '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,
     '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
@@ -142,6 +147,10 @@ def _parse_option(option: str):
         if quantity is None:
             return None
         return SHUANGSHUANG_LABEL, '', quantity, '組'
+
+    shorthand_match = _SHUANGSHUANG_SHORTHAND_PATTERN.match(option)
+    if shorthand_match:
+        return SHUANGSHUANG_LABEL, '', int(shorthand_match.group(1)), '組'
 
     match = _OPTION_PATTERN.match(option)
     if not match:
