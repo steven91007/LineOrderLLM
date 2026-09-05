@@ -37,6 +37,9 @@ class ChatLogOrderSignature(dspy.Signature):
        這些情況一樣要輸出，把缺漏寫進 issues，不要因為不完整就整筆丟掉。
     5. 不要臆測沒講的資訊。沒提到的欄位就留空字串，並在 issues 裡說明。
     6. 寧可多輸出也不要漏。漏掉一張訂單的代價遠高於多出一張。
+    7. 「雙雙對對」是固定組合的獨立品項（不分 18A/20A 規格），不要把它當成
+       家庭號的一種規格。訂單裡出現「雙雙對對」時只填 shuangshuang_sets，
+       family_spec/family_boxes 留 null。
     """
     chat_log = dspy.InputField(desc="LINE 聊天紀錄原文，可能含時間戳記與發話者名稱")
     current_date = dspy.InputField(desc="今天的日期，格式：YYYY-MM-DD (星期X)，用於解析『這週三』『下週日』等相對日期")
@@ -46,7 +49,8 @@ class ChatLogOrderSignature(dspy.Signature):
         '{"orderer": "訂購人LINE暱稱", "sender_name": "寄件人", "sender_phone": "寄件人電話", '
         '"sender_address": "寄件人地址", "receiver_name": "收件人", "receiver_phone": "收件人電話", '
         '"receiver_address": "收件人地址", "giftbox_spec": "18A或20A或null", "giftbox_boxes": 盒數或null, '
-        '"family_spec": "18A或20A或null", "family_boxes": 箱數或null, "last5": "匯款後五碼", '
+        '"family_spec": "18A或20A或null", "family_boxes": 箱數或null, '
+        '"shuangshuang_sets": "雙雙對對組數或null", "last5": "匯款後五碼", '
         '"shipping_date": "YYYY-MM-DD或null", "source_quote": "此訂單依據的原始訊息片段", '
         '"issues": ["缺漏或不確定之處"]}'
     ))
@@ -145,6 +149,25 @@ class ChatLogParser(dspy.Module):
             "2026/08/12 10:05\t王大明\t好我再想想"
         )
 
+        shuangshuang_log = (
+            "2026/09/05 08:10\t陳小美\t我要訂雙雙對對兩組\n"
+            "2026/09/05 08:11\t陳小美\t陳小美 0912345678 台中市西區台灣大道二段2號\n"
+            "2026/09/05 08:12\t陳小美\t末五碼88888 麻煩10號出貨"
+        )
+        shuangshuang_out = [
+            {
+                "orderer": "陳小美", "sender_name": "陳小美", "sender_phone": "0912345678",
+                "sender_address": "", "receiver_name": "陳小美", "receiver_phone": "0912345678",
+                "receiver_address": "台中市西區台灣大道二段2號",
+                "giftbox_spec": None, "giftbox_boxes": None,
+                "family_spec": None, "family_boxes": None,
+                "shuangshuang_sets": 2, "last5": "88888",
+                "shipping_date": "2026-09-10",
+                "source_quote": "我要訂雙雙對對兩組 / 末五碼88888 麻煩10號出貨",
+                "issues": ["寄收件人同一人，依訊息推定"],
+            },
+        ]
+
         return [
             dspy.Example(
                 chat_log=multi_receiver_log,
@@ -163,6 +186,12 @@ class ChatLogParser(dspy.Module):
                 current_date="2026-08-12 (星期三)",
                 available_items=self.available_items,
                 orders_json="[]",
+            ).with_inputs("chat_log", "current_date", "available_items"),
+            dspy.Example(
+                chat_log=shuangshuang_log,
+                current_date="2026-09-05 (星期六)",
+                available_items=self.available_items,
+                orders_json=json.dumps(shuangshuang_out, ensure_ascii=False),
             ).with_inputs("chat_log", "current_date", "available_items"),
         ]
 
@@ -189,8 +218,8 @@ class ChatLogParser(dspy.Module):
         """複查漏單，回傳第一輪沒抓到的訂單"""
         summary = '\n'.join(
             f'- {order.get("receiver_name") or "（未填收件人）"}／'
-            f'{order.get("giftbox_spec") or order.get("family_spec") or "?"} '
-            f'{order.get("giftbox_boxes") or order.get("family_boxes") or "?"}'
+            f'{order.get("giftbox_spec") or order.get("family_spec") or ("雙雙對對" if order.get("shuangshuang_sets") else "?")} '
+            f'{order.get("giftbox_boxes") or order.get("family_boxes") or order.get("shuangshuang_sets") or "?"}'
             for order in orders
         ) or '（第一輪沒有抽出任何訂單）'
 
@@ -223,7 +252,8 @@ class ChatLogParser(dspy.Module):
         has_receiver = bool((order.get('receiver_name') or '').strip())
         has_item = any(
             order.get(key) for key in ('giftbox_spec', 'giftbox_boxes',
-                                       'family_spec', 'family_boxes')
+                                       'family_spec', 'family_boxes',
+                                       'shuangshuang_sets')
         )
         return not has_receiver and not has_item
 
