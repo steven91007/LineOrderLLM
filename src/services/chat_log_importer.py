@@ -20,8 +20,10 @@ from ..utils.form_options import (
     FAMILY_OPTIONS_CONFIRMED,
     MAX_FAMILY_BOXES,
     MAX_GIFTBOX_BOXES,
+    MAX_SHUANGSHUANG_SETS,
     family_option,
     giftbox_option,
+    shuangshuang_option,
 )
 from ..utils.form_sheet_client import (
     FormSheetClient,
@@ -214,9 +216,16 @@ class ChatLogImporter:
             raw.get('family_spec'), raw.get('family_boxes'),
             family_option, MAX_FAMILY_BOXES, '家庭號', '箱', problems,
         )
+        shuangshuang = self._resolve_shuangshuang(raw.get('shuangshuang_sets'), problems)
+
+        if family and shuangshuang:
+            problems.append('家庭號與雙雙對對同時出現，J 欄只能擇一寫入，請人工確認')
+        family = family or shuangshuang
 
         if family and not FAMILY_OPTIONS_CONFIRMED:
             problems.append('家庭號選項字串尚未和 Google 表單核對過，請確認後再寫入')
+        if shuangshuang:
+            problems.append('雙雙對對選項字串尚未和 Google 表單核對過，請確認表單已加上此選項後再寫入')
 
         shipping_date = self._resolve_shipping_date(raw.get('shipping_date'), problems, moment)
 
@@ -313,6 +322,34 @@ class ChatLogImporter:
         option = lookup(str(spec), count)
         if not option:
             problems.append(f'{label}找不到對應選項：{spec} {count}{unit}')
+        return option
+
+    def _resolve_shuangshuang(self, sets: Any, problems: List[str]) -> Optional[str]:
+        """把「組數」對照成雙雙對對的選項字串（不分規格）"""
+        if not sets:
+            return None
+
+        with tracing.trace('resolve-item-雙雙對對', input_data={'quantity': sets}) as span:
+            option = self._resolve_shuangshuang_inner(sets, problems)
+            span.update(output=option, metadata={'matched': option is not None})
+            return option
+
+    def _resolve_shuangshuang_inner(self, sets: Any, problems: List[str]) -> Optional[str]:
+        try:
+            count = int(sets)
+        except (TypeError, ValueError):
+            problems.append(f'雙雙對對數量無法辨識（{sets}）')
+            return None
+
+        if count > MAX_SHUANGSHUANG_SETS:
+            problems.append(
+                f'雙雙對對 {count}組超過表單選項上限（最多 {MAX_SHUANGSHUANG_SETS}組），需拆單或人工處理'
+            )
+            return None
+
+        option = shuangshuang_option(count)
+        if not option:
+            problems.append(f'雙雙對對找不到對應選項：{count}組')
         return option
 
     def _resolve_shipping_date(self, value: Any, problems: List[str],
