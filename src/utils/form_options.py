@@ -72,9 +72,20 @@ FAMILY_OPTIONS: Dict[Tuple[str, int], str] = {
     ('20A', 3): '20A 3箱 $6,330',
 }
 
-# 表單提供到 8 盒 / 3 箱，超過的量沒有對應選項，需拆單
+# 「雙雙對對」：固定單價 $3,400/組，不分規格，寫入家庭號欄位（J 欄）。
+# 2026-09-05 新增：Google 表單尚未加上這個下拉選項，以下字串是提案格式，
+# 待表單實際加入選項後，要跟表單原文逐字核對（比照 FORM_OPTIONS_VERIFIED_ON 的做法）。
+SHUANGSHUANG_OPTIONS: Dict[int, str] = {
+    1: '雙雙對對 一組 $3,400',
+    2: '雙雙對對 兩組 $6,800',
+    3: '雙雙對對 三組 $10,200',
+    4: '雙雙對對 四組 $13,600',
+}
+
+# 表單提供到 8 盒 / 3 箱 / 4 組，超過的量沒有對應選項，需拆單
 MAX_GIFTBOX_BOXES = max(boxes for _, boxes in GIFTBOX_OPTIONS)
 MAX_FAMILY_BOXES = max(boxes for _, boxes in FAMILY_OPTIONS)
+MAX_SHUANGSHUANG_SETS = max(SHUANGSHUANG_OPTIONS)
 
 
 def giftbox_option(spec: str, boxes: int) -> Optional[str]:
@@ -85,6 +96,11 @@ def giftbox_option(spec: str, boxes: int) -> Optional[str]:
 def family_option(spec: str, boxes: int) -> Optional[str]:
     """把「規格 + 箱數」轉成家庭號欄位的選項字串，無對應選項時回傳 None"""
     return FAMILY_OPTIONS.get((_normalize_spec(spec), boxes))
+
+
+def shuangshuang_option(sets: int) -> Optional[str]:
+    """把「組數」轉成雙雙對對的選項字串（寫入家庭號欄位），無對應選項時回傳 None"""
+    return SHUANGSHUANG_OPTIONS.get(sets)
 
 
 def _normalize_spec(spec: str) -> str:
@@ -104,4 +120,11 @@ def describe_options() -> str:
         f'{spec} {boxes}箱'
         for (spec, boxes) in sorted(FAMILY_OPTIONS)
     )
-    return f'精選禮盒（6顆/盒）：{giftbox}\n家庭號（12顆/箱）：{family}'
+    shuangshuang = '、'.join(
+        f'{sets}組' for sets in sorted(SHUANGSHUANG_OPTIONS)
+    )
+    return (
+        f'精選禮盒（6顆/盒）：{giftbox}\n'
+        f'家庭號（12顆/箱）：{family}\n'
+        f'雙雙對對（固定組合，不分規格，寫入家庭號欄位）：{shuangshuang}'
+    )

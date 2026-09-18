@@ -30,6 +30,17 @@ FAMILY_LABEL = '家庭號'
 # 選項字串開頭的「規格 + 數量 + 單位」，例如 `20A 一盒 $1,150`、`18A 1箱 $1,850`
 _OPTION_PATTERN = re.compile(r'^\s*(\d+\s*[A-Za-z])\s*([一二兩三四五六七八九十\d]+)\s*([盒箱])')
 
+# 「雙雙對對」不分規格，固定寫入家庭號欄位，格式如 `雙雙對對 一組 $3,400`
+SHUANGSHUANG_LABEL = '雙雙對對'
+_SHUANGSHUANG_PATTERN = re.compile(
+    rf'^\s*{SHUANGSHUANG_LABEL}\s*([一二兩三四五六七八九十\d]+)\s*組'
+)
+
+# 表單選項還沒上架前，小編習慣直接手打「雙雙對對*數量」，也一併認得
+_SHUANGSHUANG_SHORTHAND_PATTERN = re.compile(
+    rf'^\s*{SHUANGSHUANG_LABEL}\s*\*\s*(\d+)\s*$'
+)
+
 _CHINESE_TO_INT = {
     '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,
     '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
@@ -47,8 +58,9 @@ class SummaryLine(NamedTuple):
 
     @property
     def text(self) -> str:
-        """`20A 家庭號 1箱*2個地址`"""
-        return f'{self.spec} {self.category} {self.quantity}{self.unit}*{self.addresses}個地址'
+        """`20A 家庭號 1箱*2個地址`（無規格的品項如雙雙對對，省略規格）"""
+        prefix = f'{self.spec} {self.category}' if self.spec else self.category
+        return f'{prefix} {self.quantity}{self.unit}*{self.addresses}個地址'
 
 
 def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
@@ -82,8 +94,9 @@ def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
                 unparsed.append(raw)
                 continue
 
-            spec, quantity, unit = parsed
-            key = (category, spec, quantity, unit)
+            category_override, spec, quantity, unit = parsed
+            line_category = category_override or category
+            key = (line_category, spec, quantity, unit)
             counts[key] = counts.get(key, 0) + 1
 
     lines = [
@@ -127,7 +140,18 @@ def _totals_text(summary: Dict[str, Any]) -> str:
 
 
 def _parse_option(option: str):
-    """把選項字串拆成 (規格, 數量, 單位)，看不懂回 None"""
+    """把選項字串拆成 (類別覆寫或 None, 規格, 數量, 單位)，看不懂回 None"""
+    shuangshuang_match = _SHUANGSHUANG_PATTERN.match(option)
+    if shuangshuang_match:
+        quantity = _to_int(shuangshuang_match.group(1))
+        if quantity is None:
+            return None
+        return SHUANGSHUANG_LABEL, '', quantity, '組'
+
+    shorthand_match = _SHUANGSHUANG_SHORTHAND_PATTERN.match(option)
+    if shorthand_match:
+        return SHUANGSHUANG_LABEL, '', int(shorthand_match.group(1)), '組'
+
     match = _OPTION_PATTERN.match(option)
     if not match:
         return None
@@ -137,7 +161,7 @@ def _parse_option(option: str):
     if quantity is None:
         return None
 
-    return spec, quantity, match.group(3)
+    return None, spec, quantity, match.group(3)
 
 
 def _to_int(text: str):
