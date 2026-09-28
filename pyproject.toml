@@ -10,8 +10,8 @@ dependencies = [
     "flask>=3.1.1",
     "google-api-python-client>=2.177.0",
     # LLM 追蹤（取代原本的 MLflow）
-    "langfuse>=4.14.4",
-    "openinference-instrumentation-dspy>=0.1.39",
+    "langfuse>=4.15.6",
+    "openinference-instrumentation-dspy>=0.1.45",
     "line-bot-sdk>=3.17.1",
     "openai>=1.97.1",
     "pydantic-settings>=2.10.1",
