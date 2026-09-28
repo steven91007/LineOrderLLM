@@ -37,3 +37,6 @@ knowledge/index.db-shm
 knowledge/pending.json
 knowledge/summaries.json
 knowledge/**/.*.md.tmp
+
+# 自簽 TLS 憑證與私鑰：用 ./setup_ssl.sh 在本機重新產生，不得進版控
+ssl/*.pem
