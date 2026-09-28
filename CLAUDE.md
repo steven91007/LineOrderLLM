@@ -73,3 +73,7 @@ The five canonical triage labels, used as-is (`needs-triage`, `needs-info`, `rea
 ### Domain docs
 
 Single-context — `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/agents/domain.md`.
+
+### Git history (gitkb)
+
+`knowledge/` holds one sha256-named note per commit and per file change, written by Claude Code via `/gitkb` and indexed by `uv run python -m gitkb`. Before changing code, check why it is the way it is with `gitkb history <path>` / `gitkb search <query>`; after new commits, run `/gitkb`. See `docs/agents/gitkb.md`.

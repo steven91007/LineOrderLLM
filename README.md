@@ -58,3 +58,6 @@ LINE_CHANNEL_SECRET=您的Channel Secret
 - ngrok 免費版的 URL 會在每次重啟時改變
 - 需要在 LINE Developers Console 更新新的 Webhook URL
 - 建議申請 ngrok 付費版以獲得固定 URL
+## gitkb：git 歷史知識庫
+
+`knowledge/` 底下有每個 commit、每個檔案變更的摘要筆記（檔名是被摘要文字的 sha256），可用 `uv run python -m gitkb search / show / history / log` 查「這段程式為什麼長這樣」。新 commit 之後在 Claude Code 裡輸入 `/gitkb` 更新。詳見 `docs/agents/gitkb.md`。
