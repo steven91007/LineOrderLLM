@@ -9,7 +9,7 @@ dependencies = [
     "dspy>=2.6.27",
     "flask>=3.1.1",
     "google-api-python-client>=2.177.0",
-    # LLM 追蹤（取代原本的 MLflow）
+    # LLM tracing (replaces the former MLflow)
     "langfuse>=4.15.6",
     "openinference-instrumentation-dspy>=0.1.45",
     "line-bot-sdk>=3.17.1",
@@ -23,6 +23,6 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-# 測試從 repo 根目錄 import src.* 和 config，需要把根目錄放進 sys.path
+# Tests import src.* and config from the repo root, so the root must be on sys.path
 pythonpath = ["."]
 testpaths = ["tests"]

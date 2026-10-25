@@ -1,23 +1,23 @@
-"""把服務層的結果算成 Discord 要的 embed / 文字
+"""Turn service-layer results into the embeds / text Discord needs
 
-這裡全部都是純函式：不碰網路、不碰 LLM、不需要 Google 憑證，
-所以可以直接用手工造的 ParsedOrder 做單元測試（tests/test_discord_format.py）。
+Everything here is a pure function: no network, no LLM, no Google credentials,
+so it can be unit-tested directly with hand-built ParsedOrder objects (tests/test_discord_format.py).
 
-Discord 的硬限制（超過會被 API 退回 400）：
-    訊息內容 2000 字
-    embed：title 256、description 4096、field name 256、field value 1024、footer 2048
-    單一 embed 最多 25 個 field
-    一則訊息裡「所有 embed 加總」6000 字
-    一則訊息最多 10 個 embed
+Discord's hard limits (exceeding them gets a 400 back from the API):
+    Message content: 2000 chars
+    embed: title 256, description 4096, field name 256, field value 1024, footer 2048
+    At most 25 fields per embed
+    6000 chars for "all embeds combined" in one message
+    At most 10 embeds per message
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 
 import discord
 
-# 和 import_chat_log.py:29 同一份對照表。刻意複製而不是 import：
-# 那個模組在 import 時會重包 sys.stdout（為了 Windows cp950 主控台），
-# 在 bot 行程裡發生會把 logging 的輸出一起弄壞。
+# Same mapping as import_chat_log.py:29. Deliberately copied rather than imported:
+# that module re-wraps sys.stdout on import (for the Windows cp950 console),
+# which would also break logging output if it happened inside the bot process.
 STATUS_LABEL = {
     'ready': '可寫入',
     'review': '需確認',
@@ -36,21 +36,21 @@ STATUS_COLOR = {
     'duplicate': 0x95A5A6,
 }
 
-# 一則訊息最多塞幾個 embed，以及字數預算。
-# 6000 是 Discord 的硬上限，留 500 字餘裕給我們算不到的欄位。
+# Max embeds per message, and the character budget.
+# 6000 is Discord's hard limit; leave 500 chars of headroom for fields we can't account for.
 MAX_EMBEDS_PER_MESSAGE = 10
 MAX_CHARS_PER_MESSAGE = 5500
 MAX_FIELDS_PER_EMBED = 25
 
-# 明細超過這個數量就改走附件，不再一筆一個 embed
+# Above this many details, switch to an attachment instead of one embed per order
 DETAIL_EMBED_LIMIT = 10
 
-# organize 的日期分頁 field 上限。留一格給「其餘 N 個分頁」
+# Field limit for organize's date sheets. One slot is reserved for "其餘 N 個分頁" (remaining N sheets)
 ORGANIZE_FIELD_LIMIT = 24
 
 
 def truncate(text: str, limit: int) -> str:
-    """截斷過長的字串，並在結尾標示已截斷"""
+    """Truncate an overly long string and mark the truncation at the end"""
     text = str(text or '')
     if len(text) <= limit:
         return text
@@ -58,7 +58,7 @@ def truncate(text: str, limit: int) -> str:
 
 
 def count_statuses(parsed_orders: List[Any]) -> Dict[str, int]:
-    """數出 可寫入／需確認／已存在 各幾筆"""
+    """Count how many are ready / review / duplicate (可寫入／需確認／已存在)"""
     counts = {'ready': 0, 'review': 0, 'duplicate': 0}
     for parsed in parsed_orders:
         counts[parsed.status] = counts.get(parsed.status, 0) + 1
@@ -66,26 +66,26 @@ def count_statuses(parsed_orders: List[Any]) -> Dict[str, int]:
 
 
 def format_items(order: Dict[str, Any]) -> str:
-    """把禮盒／家庭號組成一行品項（和 import_chat_log._print_preview 同一個寫法）
+    """Join gift box / family pack into one item line (same approach as import_chat_log._print_preview)
 
-    giftbox 和 family 都可能是 None（模型沒對到表單選項），要一起濾掉。
+    Both giftbox and family may be None (model didn't match a form option); filter both out.
     """
     items = ' / '.join(x for x in (order.get('giftbox'), order.get('family')) if x)
     return items or '（無）'
 
 
 def _embed_length(embed: discord.Embed) -> int:
-    """算一個 embed 佔多少字（Discord 用來檢查 6000 上限的算法）"""
+    """Character count of one embed (the method Discord uses to check the 6000 limit)"""
     return len(embed)
 
 
-# ─────────────────────────── 匯入預覽 ───────────────────────────
+# ─────────────────────────── Import preview ───────────────────────────
 
 
 def summary_embed(parsed_orders: List[Any], counts: Dict[str, int],
                   source_label: str, model: str,
                   elapsed_seconds: float) -> discord.Embed:
-    """匯入預覽的摘要 embed"""
+    """Summary embed for the import preview"""
     total = len(parsed_orders)
     duplicate = counts.get('duplicate', 0)
 
@@ -105,9 +105,9 @@ def summary_embed(parsed_orders: List[Any], counts: Dict[str, int],
     embed.add_field(name='模型', value=truncate(model, 1024), inline=True)
     embed.add_field(name='耗時', value=f'{elapsed_seconds:.0f} 秒', inline=True)
 
-    # 「已存在」永遠不會被寫入，連按「含需確認」也一樣（chat_log_importer.py:364
-    # 的 allowed 只有 ready/review）。不在這裡講清楚的話，使用者只會看到
-    # 寫入結果裡一個沒來由的 skipped 數字。
+    # "Duplicate" orders are never written, even with "含需確認" (include review)
+    # (allowed in chat_log_importer.py:364 is only ready/review). Without spelling it out here,
+    # the user would just see an unexplained skipped count in the write result.
     if duplicate:
         embed.add_field(
             name=f'已存在的 {duplicate} 筆不會寫入',
@@ -120,7 +120,7 @@ def summary_embed(parsed_orders: List[Any], counts: Dict[str, int],
 
 
 def order_embed(index: int, parsed: Any) -> discord.Embed:
-    """單筆訂單的明細 embed"""
+    """Detail embed for a single order"""
     order = parsed.order
     status = parsed.status
 
@@ -141,7 +141,7 @@ def order_embed(index: int, parsed: Any) -> discord.Embed:
     )
     embed.add_field(name='品項', value=truncate(format_items(order), 1024), inline=True)
     embed.add_field(name='末五碼', value=truncate(order.get('last5') or '—', 1024), inline=True)
-    # CONTEXT.md 的詞彙表以「出貨日」為準（程式碼裡有些地方寫「配送日」）
+    # CONTEXT.md's glossary uses "出貨日" (shipping date) as canonical (some code says "配送日")
     embed.add_field(name='出貨日', value=truncate(order.get('shipping_date') or '—', 1024), inline=True)
     embed.add_field(
         name='收件地址',
@@ -171,10 +171,10 @@ def order_embed(index: int, parsed: Any) -> discord.Embed:
 
 def order_embeds(parsed_orders: List[Any],
                  limit: int = DETAIL_EMBED_LIMIT) -> List[List[discord.Embed]]:
-    """把明細 embed 依「每則訊息」分組
+    """Group detail embeds per message
 
-    回傳 list of list：外層是訊息、內層是那則訊息要帶的 embed。
-    同時受 10 個 embed 和 6000 字兩個上限約束。
+    Returns a list of lists: outer is messages, inner is the embeds that message carries.
+    Constrained by both the 10-embed and 6000-char limits.
     """
     messages: List[List[discord.Embed]] = []
     current: List[discord.Embed] = []
@@ -199,10 +199,10 @@ def order_embeds(parsed_orders: List[Any],
 
 
 def preview_text(parsed_orders: List[Any]) -> str:
-    """完整的純文字預覽，給訂單太多時當附件用
+    """Full plain-text preview, used as an attachment when there are too many orders
 
-    刻意重現 import_chat_log._print_preview 的版面：那個格式已經在用了，
-    而且純文字不受任何 embed 限制，30 筆和 300 筆走同一條路。
+    Deliberately reproduces the layout of import_chat_log._print_preview: that format is already
+    in use, and plain text isn't bound by any embed limits, so 30 and 300 orders take the same path.
     """
     lines: List[str] = []
     counts = {'ready': 0, 'review': 0, 'duplicate': 0}
@@ -233,29 +233,29 @@ def preview_text(parsed_orders: List[Any]) -> str:
 
 
 def needs_attachment(parsed_orders: List[Any]) -> bool:
-    """訂單筆數超過明細 embed 上限時，要改附完整預覽檔"""
+    """When the order count exceeds the detail-embed limit, attach the full preview file instead"""
     return len(parsed_orders) > DETAIL_EMBED_LIMIT
 
 
 def overflow_note(parsed_orders: List[Any]) -> str:
-    """明細被截斷時的說明文字"""
+    """Explanatory text when the details are truncated"""
     hidden = len(parsed_orders) - DETAIL_EMBED_LIMIT
     return f'另有 {hidden} 筆未顯示，完整內容請看附件 匯入預覽.txt'
 
 
-# ─────────────────────────── 寫入結果 ───────────────────────────
+# ─────────────────────────── Write result ───────────────────────────
 
 
 def write_result_embed(result: Dict[str, Any], counts: Dict[str, int],
                        include_review: bool) -> discord.Embed:
-    """把 ChatLogImporter.write() 的四種回傳形狀轉成給人看的 embed
+    """Turn the four return shapes of ChatLogImporter.write() into a human-readable embed
 
-    四種形狀（見 chat_log_importer.py:353-387）：
-      1. 欄位檢查失敗    success=False + error + mismatches
-      2. 沒有符合條件的  success=True  + appended_rows=0（沒有 updated_range）
-      3. 寫入成功        success=True  + appended_rows + updated_range + skipped
-      4. Sheets API 失敗 success=False + error + skipped（沒有 mismatches）
-    所有 key 一律用 .get()。
+    The four shapes (see chat_log_importer.py:353-387):
+      1. Column check failed  success=False + error + mismatches
+      2. Nothing eligible     success=True  + appended_rows=0 (no updated_range)
+      3. Write succeeded      success=True  + appended_rows + updated_range + skipped
+      4. Sheets API failed    success=False + error + skipped (no mismatches)
+    Always use .get() for every key.
     """
     duplicate = counts.get('duplicate', 0)
     skipped = result.get('skipped', 0)
@@ -279,7 +279,7 @@ def write_result_embed(result: Dict[str, Any], counts: Dict[str, int],
                 inline=False,
             )
         else:
-            # append 是單一 API 呼叫，失敗就是整批沒進去，可以講死
+            # append is a single API call; failure means the whole batch didn't go in, so we can say so definitively
             embed.add_field(
                 name='怎麼處理',
                 value='沒有任何資料被寫入，可以直接重試。',
@@ -331,16 +331,16 @@ def _is_quota_error(error: Any) -> bool:
     return '429' in text or 'Quota' in text or 'quota' in text
 
 
-# ─────────────────────────── 日期分頁整理 ───────────────────────────
+# ─────────────────────────── Date sheet organizing ───────────────────────────
 
 
 def organize_preview_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
-    """/organize 的預覽 embed
+    """Preview embed for /organize
 
-    回傳 (embed, 附件文字)。分頁數超過 24 個時，附件文字才不是 None。
+    Returns (embed, attachment text). The attachment text is non-None only when there are more than 24 sheets.
 
-    注意：空總表的回傳形狀完全沒有 summaries／stale_sheets 這兩個 key
-    （sheet_date_organizer.py:79-85），所以一律用 .get()。
+    Note: the return shape for an empty master sheet has no summaries / stale_sheets keys at all
+    (sheet_date_organizer.py:79-85), so always use .get().
     """
     groups = result.get('groups') or {}
     summaries = result.get('summaries') or {}
@@ -351,7 +351,7 @@ def organize_preview_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optio
         title='日期分頁整理預覽',
         description=(f'來源分頁：{result.get("source_sheet") or "—"}\n'
                      f'共 {result.get("total_rows", 0)} 筆訂單，分成 {len(groups)} 個分頁'),
-        # 有分頁要被清空就用橘色：這是破壞性的部分，要看得出來
+        # Orange when some sheets will be cleared: that is the destructive part and must stand out
         color=0xE67E22 if stale else 0x3498DB,
     )
 
@@ -405,13 +405,13 @@ def _sheet_field_name(sheet_name: str, row_count: int, is_locked: bool = False) 
 
 
 def _summary_value(summary: Optional[Dict[str, Any]]) -> str:
-    """一個日期分頁的出貨統計（比照 organize_by_date._print_summary）"""
+    """Shipping stats for one date sheet (mirrors organize_by_date._print_summary)"""
     if not summary:
         return '（無出貨統計）'
 
     lines = [line.text for line in summary.get('lines') or []]
 
-    # unparsed 會有重複，CLI 在 organize_by_date.py:100 也是先 set 再排序
+    # unparsed may contain duplicates; the CLI in organize_by_date.py:100 also dedupes with set then sorts
     for raw in sorted(set(summary.get('unparsed') or [])):
         lines.append(f'⚠️ 品項無法辨識，未列入統計：{raw}')
 
@@ -423,7 +423,7 @@ def _summary_value(summary: Optional[Dict[str, Any]]) -> str:
 
 
 def organize_preview_text(result: Dict[str, Any]) -> str:
-    """完整的純文字版日期分頁預覽，分頁太多時當附件"""
+    """Full plain-text date-sheet preview, used as an attachment when there are too many sheets"""
     groups = result.get('groups') or {}
     summaries = result.get('summaries') or {}
     stale = result.get('stale_sheets') or []
@@ -448,11 +448,11 @@ def organize_preview_text(result: Dict[str, Any]) -> str:
 
 
 def organize_result_embed(result: Dict[str, Any]) -> discord.Embed:
-    """/organize 實際寫入後的結果
+    """Result after /organize actually writes
 
-    要特別處理「部分寫入失敗」：success=False 但 written_sheets 有值
-    （sheet_date_organizer.py:132-134）。organize_by_date.py 直接丟掉這個資訊，
-    操作者就不知道破壞性重寫做到哪裡了。
+    "Partial write failure" needs special handling: success=False but written_sheets is non-empty
+    (sheet_date_organizer.py:132-134). organize_by_date.py just discards this information,
+    leaving the operator unaware of how far the destructive rewrite got.
     """
     written = result.get('written_sheets') or []
     stale = result.get('stale_sheets') or []
@@ -495,13 +495,13 @@ def organize_result_embed(result: Dict[str, Any]) -> discord.Embed:
     return embed
 
 
-# ─────────────────────── 非出貨日稽核 ───────────────────────
+# ─────────────────────── Non-shipping-day audit ───────────────────────
 
 
 def offday_embed(result: Dict[str, Any]) -> Tuple[discord.Embed, Optional[str]]:
-    """/offday 的結果
+    """Result of /offday
 
-    回傳 (embed, 附件文字)。筆數太多塞不進 embed 時，附件文字才不是 None。
+    Returns (embed, attachment text). The attachment text is non-None only when there are too many rows to fit in the embed.
     """
     from ..utils.shipping_days import shipping_days_text
 
@@ -604,7 +604,7 @@ def _backdated_line(order: Any) -> str:
 
 
 def offday_text(result: Dict[str, Any]) -> str:
-    """完整的純文字版，筆數太多時當附件"""
+    """Full plain-text version, used as an attachment when there are too many rows"""
     offday = result.get('offday') or {}
     unknown = result.get('unknown') or []
     backdated = result.get('backdated') or []

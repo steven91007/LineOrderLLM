@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# 啟動 Flask 應用
+# Start the Flask app
 echo "Starting Flask application..."
 python main.py &
 FLASK_PID=$!
 
-# 等待 Flask 啟動
+# Wait for Flask to start
 sleep 5
 
-# 啟動 ngrok
+# Start ngrok
 echo "Starting ngrok tunnel..."
 ngrok http 5001 --log=stdout
 
-# 當腳本結束時，終止 Flask 應用
+# When the script exits, kill the Flask app
 trap "kill $FLASK_PID" EXIT

@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """
-把 LINE 聊天紀錄匯入 Google 表單回覆試算表
+Import a LINE chat log into the Google Form response sheet.
 
-用法：
-    # 只預覽，不寫入（預設）
+Usage:
+    # Preview only, write nothing (default)
     python import_chat_log.py chat.txt
 
-    # 確認沒問題後才真的寫入
+    # Actually write once you've confirmed it looks right
     python import_chat_log.py chat.txt --write
 
-    # 連同「需人工確認」的訂單一起寫入
+    # Also write the orders flagged as needing manual review
     python import_chat_log.py chat.txt --write --include-review
+
+Note: the console preview/output text stays in Chinese because it is read by
+shop staff.
 """
 
 import argparse
@@ -21,7 +24,7 @@ from pathlib import Path
 import config
 from src.services.chat_log_importer import ChatLogImporter
 
-# Windows 主控台預設 cp950，直接印中文會炸掉
+# The Windows console defaults to cp950; printing Chinese directly would crash
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -33,16 +36,16 @@ STATUS_LABEL = {
 
 
 def main():
-    parser = argparse.ArgumentParser(description='把聊天紀錄解析成訂單並寫入 Google 試算表')
-    parser.add_argument('chat_log', help='聊天紀錄檔案路徑（LINE 匯出的 .txt）')
+    parser = argparse.ArgumentParser(description='Parse a chat log into orders and write them to the Google Sheet')
+    parser.add_argument('chat_log', help='Path to the chat log file (the .txt exported from LINE)')
     parser.add_argument('--write', action='store_true',
-                        help='實際寫入試算表；未指定時只顯示預覽')
+                        help='Actually write to the sheet; without it, only show a preview')
     parser.add_argument('--include-review', action='store_true',
-                        help='連同需人工確認的訂單一併寫入')
+                        help='Also write the orders that need manual review')
     parser.add_argument('--model', default=config.DSPY_MODEL,
-                        help=f'使用的 OpenAI 模型（預設 {config.DSPY_MODEL}）')
+                        help=f'OpenAI model to use (default {config.DSPY_MODEL})')
     parser.add_argument('--no-normalize-address', action='store_true',
-                        help='不要套用地址標準化，保留客人原本的寫法')
+                        help="Don't apply address normalization; keep the customer's original wording")
     args = parser.parse_args()
 
     chat_path = Path(args.chat_log)

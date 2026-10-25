@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 """
-聊天紀錄匯入訂單的圖形介面
+GUI for importing orders from chat logs.
 
-在本機起一個小網頁，貼上聊天紀錄 → 預覽解析結果 → 勾選後寫入 Google 試算表。
+Starts a small local web page: paste a chat log → preview the parse results →
+tick the orders to write to the Google Sheet.
 
-用法：
+Usage:
     python chat_import_gui.py
 
-啟動後瀏覽器會自動打開 http://127.0.0.1:5055
+Once started, the browser opens http://127.0.0.1:5055 automatically.
 
-這是本機工具，只綁 127.0.0.1，不對外開放。
+This is a local tool: it binds only to 127.0.0.1 and is not exposed externally.
+
+Note: the Chinese 'error' strings in the JSON responses are shown in the GUI to
+shop staff, so they stay in Chinese.
 """
 
 import logging
@@ -28,8 +32,8 @@ app = Flask(__name__)
 
 PORT = 5055
 
-# 解析結果暫存在記憶體，讓「寫入」步驟能沿用預覽時算好的資料列，
-# 不必為了寫入再呼叫一次 LLM（也避免兩次解析結果不一致）。
+# Parse results are cached in memory so the "write" step can reuse the rows computed
+# for the preview, without calling the LLM again (which also avoids two parses disagreeing).
 _state = {'orders': [], 'importer': None}
 _lock = threading.Lock()
 
@@ -63,7 +67,7 @@ def api_parse():
         )
         parsed_orders = importer.parse(chat_log)
     except Exception as error:
-        logger.exception('解析失敗')
+        logger.exception('Parse failed')
         return jsonify({'success': False, 'error': str(error)})
 
     with _lock:
@@ -103,11 +107,11 @@ def api_write():
     if not selected:
         return jsonify({'success': False, 'error': '沒有勾選任何訂單'})
 
-    # 使用者在介面上已經逐筆確認過，這裡不再依 status 過濾
+    # The user has already confirmed each order in the UI, so no filtering by status here
     try:
         result = importer.write(selected, include_review=True)
     except Exception as error:
-        logger.exception('寫入失敗')
+        logger.exception('Write failed')
         return jsonify({'success': False, 'error': str(error)})
 
     if not result.get('success'):
@@ -131,7 +135,7 @@ def _check_config():
 
 if __name__ == '__main__':
     url = f'http://127.0.0.1:{PORT}'
-    print(f'聊天紀錄匯入介面已啟動：{url}')
+    print(f'Chat-log import GUI started: {url}')
     threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    # 只綁 127.0.0.1，不讓區網其他機器連進來
+    # Bind only to 127.0.0.1 so other machines on the LAN cannot connect
     app.run(host='127.0.0.1', port=PORT, debug=False)

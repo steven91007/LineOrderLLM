@@ -1,11 +1,11 @@
-# 🔧 LIFF 重定向設定指南
+# 🔧 LIFF Redirect Setup Guide
 
-## 問題分析
-LIFF OAuth 登入過程會導致 URL 參數丟失，需要正確設定 Redirect URI。
+## Problem analysis
+The LIFF OAuth login flow drops URL parameters, so the Redirect URI has to be configured correctly.
 
-## LINE Developers Console 設定
+## LINE Developers Console settings
 
-### 1. LIFF 應用程式設定
+### 1. LIFF app settings
 ```
 LIFF app name: 訂單編輯器
 Size: Full
@@ -13,9 +13,10 @@ Endpoint URL: https://9b0723f6edc9.ngrok-free.app/liff/edit
 Scope: profile, openid
 Bot link feature: On (Aggressive)
 ```
+(`訂單編輯器` = "Order Editor", the app name shown to users.)
 
-### 2. ⚠️ 重要：Authorized Redirect URLs
-必須在 LINE Developers Console 中設定以下重定向 URL：
+### 2. ⚠️ Important: Authorized Redirect URLs
+The following redirect URLs must be configured in the LINE Developers Console:
 
 ```
 https://9b0723f6edc9.ngrok-free.app/liff/edit
@@ -23,20 +24,20 @@ https://9b0723f6edc9.ngrok-free.app/liff/edit?*
 https://liff.line.me/2007889032-OolKDrp3
 ```
 
-## 前端代碼修正
+## Front-end code fixes
 
-### 方案A：使用 redirectUri 參數（推薦）
+### Option A: use the redirectUri parameter (recommended)
 ```javascript
 liff.init({
     liffId: '2007889032-OolKDrp3'
 }).then(() => {
     if (!liff.isLoggedIn()) {
-        // 關鍵：指定登入後返回的 URL，包含原始參數
+        // Key point: specify the URL to return to after login, including the original parameters
         const currentUrl = new URL(window.location.href);
         const sessionId = currentUrl.searchParams.get('session');
         
         if (sessionId) {
-            // 建構包含 session 參數的重定向 URL
+            // Build a redirect URL that includes the session parameter
             const redirectUrl = `${window.location.origin}/liff/edit?session=${sessionId}`;
             liff.login({ redirectUri: redirectUrl });
         } else {
@@ -44,12 +45,12 @@ liff.init({
         }
         return;
     }
-    // 已登入，繼續載入訂單
+    // Already logged in; continue loading the order
     loadOrderData();
 });
 ```
 
-### 方案B：使用 localStorage 持久化會話
+### Option B: persist the session in localStorage
 ```javascript
 function saveSessionToStorage() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -64,18 +65,18 @@ function loadSessionFromStorage() {
 }
 ```
 
-### 方案C：URL 參數編碼到 state
-在生成 LIFF URL 時，將會話參數編碼到 state：
+### Option C: encode the URL parameters into state
+When generating the LIFF URL, encode the session parameter into state:
 ```
 https://liff.line.me/2007889032-OolKDrp3?state=session_${sessionId}&session=${sessionId}
 ```
 
-然後在 OAuth 回調中從 state 解析：
+Then parse it from state in the OAuth callback:
 ```javascript
 const urlParams = new URLSearchParams(window.location.search);
 const state = urlParams.get('state');
 if (state && state.startsWith('session_')) {
     const sessionId = state.replace('session_', '');
-    // 使用恢復的 sessionId
+    // Use the recovered sessionId
 }
 ```

@@ -26,7 +26,7 @@ jobs:
             set -e
             export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
             cd ~/LineOrderLLM
-            # 用 fetch + reset 而不是 pull：master 歷史曾為移除私鑰而改寫，VM 上的舊 clone 用 pull 會失敗
+            # Use fetch + reset instead of pull: master's history was rewritten to remove a private key, so pull fails on the VM's old clone
             git fetch origin master
             git reset --hard origin/master
             uv sync

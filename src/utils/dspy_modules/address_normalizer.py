@@ -1,5 +1,5 @@
 """
-台灣地址標準化 DSPy 模組
+DSPy module for Taiwan address normalization
 """
 import dspy
 import json
@@ -7,27 +7,27 @@ from typing import Dict, Any
 
 
 class AddressNormalizerSignature(dspy.Signature):
-    """台灣地址標準化 Signature
+    """Taiwan address normalization signature
     
-    將各種格式的台灣地址標準化為統一格式：
-    - 補全不完整地址（如：士林區 → 臺北市士林區）
-    - 更新舊地名（如：桃園縣中壢市 → 桃園市中壢區）
-    - 統一用字（如：台北 → 臺北）
-    - 修正錯別字和格式問題
-    - 保留地址備註（如：(XXX工地)、(XXX公司)等括號內容）
+    Normalize Taiwan addresses written in any format into a single standard format:
+    - Complete incomplete addresses (e.g. 士林區 → 臺北市士林區)
+    - Update old place names (e.g. 桃園縣中壢市 → 桃園市中壢區)
+    - Use consistent characters (e.g. 台北 → 臺北)
+    - Fix typos and formatting problems
+    - Keep address notes (parenthesized content such as (XXX工地) (construction site) or (XXX公司) (company))
     """
-    original_address = dspy.InputField(desc="原始地址文字，可能不完整或格式不標準")
-    normalized_address = dspy.OutputField(desc="標準化後的完整台灣地址，格式：縣市+區域+詳細地址，必須保留原有的括號備註信息")
+    original_address = dspy.InputField(desc="Raw address text; may be incomplete or non-standard")
+    normalized_address = dspy.OutputField(desc="The normalized full Taiwan address, formatted as city/county (縣市) + district (區域) + detailed address; any original parenthesized notes must be kept")
 
 
 class AddressNormalizer(dspy.Module):
-    """台灣地址標準化模組"""
+    """Taiwan address normalization module"""
     
     def __init__(self):
         super().__init__()
         self.normalize = dspy.ChainOfThought(AddressNormalizerSignature)
         
-        # 建立 Few-shot 範例
+        # Build the few-shot examples
         self.examples = [
             dspy.Example(
                 original_address="士林區文林路100號",
@@ -69,7 +69,7 @@ class AddressNormalizer(dspy.Module):
                 normalized_address="臺南市永康區中正路529號"
             ).with_inputs("original_address"),
             
-            # 包含備註的範例
+            # Examples that include notes
             dspy.Example(
                 original_address="士林區文林路100號(台積電工地)",
                 normalized_address="臺北市士林區文林路100號(台積電工地)"
@@ -96,61 +96,61 @@ class AddressNormalizer(dspy.Module):
             ).with_inputs("original_address")
         ]
         
-        # 注意：Few-shot 範例會在訓練時使用，這裡先初始化模組
+        # Note: the few-shot examples are used during training; here we just initialize the module
     
     def forward(self, original_address: str) -> dspy.Prediction:
         """
-        標準化地址
+        Normalize an address
         
         Args:
-            original_address: 原始地址字串
+            original_address: Raw address string
             
         Returns:
-            dspy.Prediction: 包含 normalized_address
+            dspy.Prediction: containing normalized_address
         """
         if not original_address or not isinstance(original_address, str):
             return dspy.Prediction(normalized_address=original_address)
         
-        # 預處理：移除多餘空白
+        # Pre-processing: remove extra whitespace
         cleaned_address = ' '.join(original_address.split())
         
         try:
-            # 使用 DSPy 進行地址標準化
+            # Normalize the address with DSPy
             result = self.normalize(original_address=cleaned_address)
             
-            # 後處理：確保結果合理
+            # Post-processing: make sure the result is reasonable
             normalized = result.normalized_address.strip()
             
-            # 基本檢查：確保有縣市資訊
+            # Basic check: make sure city/county info is present
             if not self._has_city_info(normalized):
-                # 如果 AI 沒有補全縣市，嘗試手動補全
+                # If the AI did not fill in the city/county, try to complete it manually
                 normalized = self._fallback_completion(cleaned_address)
             
             return dspy.Prediction(normalized_address=normalized)
             
         except Exception as e:
-            # AI 失敗時的 fallback
+            # Fallback when the AI fails
             return dspy.Prediction(normalized_address=self._fallback_completion(cleaned_address))
     
     def _has_city_info(self, address: str) -> bool:
-        """檢查地址是否包含縣市資訊"""
+        """Check whether the address contains city/county info"""
         city_indicators = ['市', '縣']
         return any(indicator in address for indicator in city_indicators)
     
     def _fallback_completion(self, address: str) -> str:
-        """簡單的 fallback 地址補全（保留備註）"""
-        # 如果已經有縣市，直接返回  
+        """Simple fallback address completion (keeps notes)"""
+        # If a city/county is already present, return as-is  
         if self._has_city_info(address):
             return address
         
-        # 提取備註（括號內容）
+        # Extract the note (parenthesized content)
         import re
         note_pattern = r'\([^)]+\)$'
         note_match = re.search(note_pattern, address)
         note = note_match.group(0) if note_match else ''
         address_without_note = re.sub(note_pattern, '', address).strip()
         
-        # 簡單的區域對應
+        # Simple district mapping
         district_mapping = {
             '士林': '臺北市士林區',
             '中正': '臺北市中正區',
@@ -189,12 +189,12 @@ class AddressNormalizer(dspy.Module):
                 result = result.replace(district, full_name)
                 break
         
-        # 重新加上備註
+        # Re-attach the note
         if note:
             result = f"{result}{note}"
         
         return result if result != address_without_note + note else address
 
 
-# 建立全域實例供其他模組使用
+# Global instance shared by other modules
 address_normalizer = AddressNormalizer()

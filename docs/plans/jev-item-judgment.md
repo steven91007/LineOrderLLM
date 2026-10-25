@@ -119,13 +119,13 @@ Why give the full chat log instead of GPT's `source_quote`: for the A/B test to 
 
 | id | Type | instructions (Chinese; see §9 for the English-variant experiment) | criteria |
 |---|---|---|---|
-| `is_order` | Noul | 「針對 `focus_receiver`，客人有沒有明確說出要買什麼（不是只問價格或還在考慮）？」 | true: 已講出品項或數量；false: 只詢價、考慮中、已取消 |
-| `giftbox_boxes` | Choice | 「客人最終要訂幾盒**精選禮盒**？改單以最後一次為準。沒有訂禮盒選 `none`。」 | `none`, `1`…`8`, `more_than_8` |
-| `giftbox_spec` | Choice | 「精選禮盒的規格是哪一個？沒訂禮盒或沒講規格選 `unspecified`。」 | `18A`, `20A`, `unspecified` |
-| `family_boxes` | Choice | 「客人最終要訂幾箱**家庭號**？不包含雙雙對對。沒有訂家庭號選 `none`。」 | `none`, `1`, `2`, `3`, `more_than_3` |
-| `family_spec` | Choice | 「家庭號的規格是哪一個？沒訂家庭號或沒講規格選 `unspecified`。」 | `18A`, `20A`, `unspecified` |
-| `shuangshuang_sets` | Choice | 「客人最終要訂幾組**雙雙對對**？沒有訂選 `none`。」 | `none`, `1`, `2`, `3`, `4`, `more_than_4` |
-| `amended` | Noul | 「客人有沒有在對話中改過數量或品項？」 | Only used to populate issues/metadata; doesn't affect the answer |
+| `is_order` | Noul | 「針對 `focus_receiver`，客人有沒有明確說出要買什麼（不是只問價格或還在考慮）？」 (For `focus_receiver`, did the customer clearly say what they want to buy, not just ask prices or still be considering?) | true: 已講出品項或數量 (stated an item or quantity); false: 只詢價、考慮中、已取消 (only asked prices, considering, or cancelled) |
+| `giftbox_boxes` | Choice | 「客人最終要訂幾盒**精選禮盒**？改單以最後一次為準。沒有訂禮盒選 `none`。」 (How many boxes of gift box does the customer finally order? Amendments: the last statement wins. Choose `none` if no gift box.) | `none`, `1`…`8`, `more_than_8` |
+| `giftbox_spec` | Choice | 「精選禮盒的規格是哪一個？沒訂禮盒或沒講規格選 `unspecified`。」 (Which spec is the gift box? Choose `unspecified` if none ordered or no spec given.) | `18A`, `20A`, `unspecified` |
+| `family_boxes` | Choice | 「客人最終要訂幾箱**家庭號**？不包含雙雙對對。沒有訂家庭號選 `none`。」 (How many cases of family pack does the customer finally order? Excludes 雙雙對對. Choose `none` if no family pack.) | `none`, `1`, `2`, `3`, `more_than_3` |
+| `family_spec` | Choice | 「家庭號的規格是哪一個？沒訂家庭號或沒講規格選 `unspecified`。」 (Which spec is the family pack? Choose `unspecified` if none ordered or no spec given.) | `18A`, `20A`, `unspecified` |
+| `shuangshuang_sets` | Choice | 「客人最終要訂幾組**雙雙對對**？沒有訂選 `none`。」 (How many sets of 雙雙對對 does the customer finally order? Choose `none` if not ordered.) | `none`, `1`, `2`, `3`, `4`, `more_than_4` |
+| `amended` | Noul | 「客人有沒有在對話中改過數量或品項？」 (Did the customer change the quantity or item during the conversation?) | Only used to populate issues/metadata; doesn't affect the answer |
 
 Design rationale:
 - Each question judges exactly one thing, with a closed set of options; `none` / `unspecified` / `more_than_N` are the catch-alls TypeSafe recommends, letting the model "decline to answer" instead of being forced into a choice.
@@ -136,14 +136,14 @@ Design rationale:
 ### 2.4 Rules for Combining Answers into `ItemFields` (Pure Code, `JevItemJudge._compose`)
 
 ```
-if nouls.is_order < IS_ORDER_THRESHOLD(0.5):  → everything becomes None, issues += ['Jev 判定不是訂單']
+if nouls.is_order < IS_ORDER_THRESHOLD(0.5):  → everything becomes None, issues += ['Jev 判定不是訂單']  ("Jev judged this is not an order"; the code now uses the English text)
 
 giftbox:
   boxes = choices.giftbox_boxes.choice
   if boxes == 'none'        → giftbox_spec=None, giftbox_boxes=None
-  elif boxes == 'more_than_8' → giftbox_boxes=9 (so the resolver takes its existing "超過上限需拆單" path)
+  elif boxes == 'more_than_8' → giftbox_boxes=9 (so the resolver takes its existing "超過上限需拆單" (over the limit, split the order) path)
   else                      → giftbox_boxes=int(boxes)
-  spec = choices.giftbox_spec.choice; 'unspecified' → None (the resolver will report "有數量但沒有規格")
+  spec = choices.giftbox_spec.choice; 'unspecified' → None (the resolver will report "有數量但沒有規格" (quantity but no spec))
 family / shuangshuang follow the same logic (more_than_3 → 4; more_than_4 → 5)
 ```
 

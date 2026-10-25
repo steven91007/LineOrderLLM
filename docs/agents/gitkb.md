@@ -1,37 +1,37 @@
-# gitkb：git 歷史知識庫
+# gitkb: git history knowledge base
 
-`knowledge/` 底下是每個 commit 的知識筆記：每個 commit 一份 `knowledge/commits/<sha256>.md`，commit 裡的每個檔案變更一份 `knowledge/changes/<sha256>.md`。檔名是「被摘要的那段標準化文字」（commit 標頭 + diff）的 sha256，所以筆記本身就能證明它描述的是哪段變更。`knowledge/index.db` 是 SQLite 索引（commit、檔案、筆記之間的對應，加上 FTS5 全文搜尋），**不進版控**、隨時可從 md 重建。
+`knowledge/` holds a knowledge note for every commit: one `knowledge/commits/<sha256>.md` per commit, and one `knowledge/changes/<sha256>.md` per file change in that commit. Each file name is the sha256 of the normalized text that was summarized (commit header + diff), so a note proves by itself which change it describes. `knowledge/index.db` is a SQLite index (mappings between commits, files and notes, plus FTS5 full-text search). It is **not version-controlled** and can be rebuilt from the md files at any time.
 
-程式碼在 `gitkb/`，與 [Jobseekers](https://github.com/steven91007/Jobseekers-) 的 `gitkb/` 是同一份；[jobseekers-mcp](https://github.com/steven91007/jobseekers-mcp) 的 `gitkb_*` 工具把 `GITKB_REPO` 指到這個 repo 就能直接查。
+The code lives in `gitkb/` and is the same as `gitkb/` in [Jobseekers](https://github.com/steven91007/Jobseekers-); the `gitkb_*` tools in [jobseekers-mcp](https://github.com/steven91007/jobseekers-mcp) can query this repo directly by pointing `GITKB_REPO` at it.
 
-## 改程式之前先查
+## Look it up before changing code
 
-要改某段程式之前，先看它為什麼長這樣：
-
-```bash
-uv run python -m gitkb history src/utils/sheet_date_organizer.py   # 某個檔案的所有變更
-uv run python -m gitkb search "雙雙對對"                            # 全文搜尋摘要（FTS5 語法）
-uv run python -m gitkb show 1e454fe                                 # 用 git sha（可縮寫）或筆記 sha256 看筆記
-uv run python -m gitkb log                                          # 已索引的 commit
-```
-
-剛 clone 下來沒有 `index.db` 時，先 `uv run python -m gitkb rebuild-index` 從 md 重建。
-
-## 新 commit 之後更新知識庫
-
-摘要由 Claude Code 在對話中撰寫，不呼叫任何 LLM API：
+Before changing a piece of code, check why it looks the way it does:
 
 ```bash
-uv run python -m gitkb pending        # 匯出還沒摘要的 commit 到 knowledge/pending.json
-#  -> 在 Claude Code 裡輸入 /gitkb，它會讀 pending.json、寫 knowledge/summaries.json
-uv run python -m gitkb import knowledge/summaries.json   # 產生筆記並建索引
+uv run python -m gitkb history src/utils/sheet_date_organizer.py   # every change to a file
+uv run python -m gitkb search "雙雙對對"                            # full-text search over summaries (FTS5 syntax)
+uv run python -m gitkb show 1e454fe                                 # view a note by git sha (abbreviation OK) or note sha256
+uv run python -m gitkb log                                          # indexed commits
 ```
 
-`knowledge/pending.json`、`knowledge/summaries.json` 是暫存檔，已在 `.gitignore`。`build --dry-run` 會先寫出佔位筆記（檔名與正式筆記相同），之後 `import` 會原地覆蓋。
+On a fresh clone with no `index.db`, run `uv run python -m gitkb rebuild-index` first to rebuild it from the md files.
 
-## 規則
+## Update the knowledge base after new commits
 
-- 不要手改 `knowledge/commits/`、`knowledge/changes/` 底下的檔案；檔名是輸入的 hash，importer 會重新產生。
-- `import` 若警告 hash recipe 改變（diff 旗標、大小上限或 `GITKB_EXCLUDE_GLOBS` 變了），先停下來問人，不要硬 import。
-- 摘要用英文寫，不得把客戶個資（姓名、電話、地址、匯款末五碼）或金鑰從 diff 抄進筆記。
-- 改了 `gitkb/` 的程式要跑 `uv run python tests/test_gitkb.py`。
+Summaries are written by Claude Code in conversation; no LLM API is called:
+
+```bash
+uv run python -m gitkb pending        # export not-yet-summarized commits to knowledge/pending.json
+#  -> type /gitkb in Claude Code; it reads pending.json and writes knowledge/summaries.json
+uv run python -m gitkb import knowledge/summaries.json   # generate the notes and build the index
+```
+
+`knowledge/pending.json` and `knowledge/summaries.json` are temporary files and are already in `.gitignore`. `build --dry-run` first writes placeholder notes (with the same file names as the real notes), which `import` later overwrites in place.
+
+## Rules
+
+- Do not hand-edit files under `knowledge/commits/` or `knowledge/changes/`; the file names are hashes of the input and the importer regenerates them.
+- If `import` warns that the hash recipe changed (diff flags, size caps or `GITKB_EXCLUDE_GLOBS` changed), stop and ask a human; do not force the import.
+- Write summaries in English, and never copy customer personal data (names, phone numbers, addresses, last five digits of a transfer) or secrets from a diff into a note.
+- After changing code in `gitkb/`, run `uv run python tests/test_gitkb.py`.

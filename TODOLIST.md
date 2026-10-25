@@ -1,136 +1,136 @@
-# 📋 LINE Bot 訂單處理系統 - 待辦事項清單
+# 📋 LINE Bot Order Processing System - To-Do List
 
-## 🐛 品項解析 Bug 修正 (當前分支重點)
+## 🐛 Item Parsing Bug Fixes (focus of the current branch)
 
-### 高優先級
-- [ ] 測試 ItemParser 在各種商品格式下的表現
-  - [ ] 測試 "18A禮盒 x2" 格式
-  - [ ] 測試 "16A蛋糕一個" 格式  
-  - [ ] 測試 "20A花束 2束" 格式
-  - [ ] 測試混合商品 "18A禮盒 x1, 16A蛋糕 x3"
-- [ ] 修正數字編號保留問題
-  - [ ] 確保 18A、16A、20A 等編號不被移除
-  - [ ] 處理特殊格式如 "18A特製禮盒(客製包裝)"
-- [ ] 優化 fallback 解析邏輯
-  - [ ] 改善中文數字轉換 (一、二、三...)
-  - [ ] 處理各種數量表達方式
-- [ ] 驗證 DSPy 與 fallback 的整合
+### High priority
+- [ ] Test ItemParser across various product formats
+  - [ ] Test the "18A禮盒 x2" format
+  - [ ] Test the "16A蛋糕一個" format  
+  - [ ] Test the "20A花束 2束" format
+  - [ ] Test mixed products "18A禮盒 x1, 16A蛋糕 x3"
+- [ ] Fix the number-code retention problem
+  - [ ] Make sure codes like 18A, 16A, 20A aren't stripped
+  - [ ] Handle special formats such as "18A特製禮盒(客製包裝)"
+- [ ] Improve the fallback parsing logic
+  - [ ] Improve Chinese numeral conversion (一、二、三...)
+  - [ ] Handle the various ways quantities are expressed
+- [ ] Verify the DSPy and fallback integration
 
-### 中優先級  
-- [ ] 新增更多測試案例
-  - [ ] 邊界情況測試 (空字串、特殊字符)
-  - [ ] 錯誤格式處理
-  - [ ] 大量商品列表處理
-- [ ] 改善錯誤處理與日誌記錄
-- [ ] 性能優化評估
+### Medium priority  
+- [ ] Add more test cases
+  - [ ] Edge cases (empty strings, special characters)
+  - [ ] Malformed input handling
+  - [ ] Large product lists
+- [ ] Improve error handling and logging
+- [ ] Performance optimization assessment
 
-## 🏠 地址標準化功能
+## 🏠 Address Normalization
 
-### 已完成 ✅
-- [x] 實現 DSPy AddressNormalizer 模組
-- [x] 建立縣市升格對照表
-- [x] 實現混合式處理 (AI + 規則)
-- [x] 保留地址備註功能 (括號內容)
-- [x] 整合至 DSPy 客戶端
+### Done ✅
+- [x] Implement the DSPy AddressNormalizer module
+- [x] Build the county/city upgrade mapping table
+- [x] Implement hybrid processing (AI + rules)
+- [x] Preserve address notes (parenthesized content)
+- [x] Integrate into the DSPy client
 
-### 待優化
-- [ ] 更多地址格式測試
-- [ ] 偏僻地區地址處理
-- [ ] 地址驗證功能增強
+### To improve
+- [ ] More address format tests
+- [ ] Handling addresses in remote areas
+- [ ] Stronger address validation
 
-## 🤖 DSPy 系統整合
+## 🤖 DSPy System Integration
 
-### 已完成 ✅
-- [x] 配置 DSPy 框架
-- [x] 實現訂單分類器
-- [x] 實現單一/多訂單解析器
-- [x] 實現驗證器
-- [x] 追蹤整合（MLflow 已於 2026-08-14 移除，改用 Langfuse）
+### Done ✅
+- [x] Configure the DSPy framework
+- [x] Implement the order classifier
+- [x] Implement the single/multi-order parsers
+- [x] Implement the validator
+- [x] Tracing integration (MLflow removed on 2026-08-14, replaced by Langfuse)
 
-### 待完成
-- [ ] Few-shot 範例優化
-- [ ] 模型參數調整
-- [ ] 錯誤處理改善
-- [ ] 重試機制優化
+### To do
+- [ ] Optimize few-shot examples
+- [ ] Tune model parameters
+- [ ] Improve error handling
+- [ ] Optimize the retry mechanism
 
-## 🔧 系統穩定性與測試
+## 🔧 System Stability and Testing
 
-### 測試相關
-- [ ] 建立完整的單元測試套件
-  - [ ] ItemParser 測試
-  - [ ] AddressNormalizer 測試  
-  - [ ] 訂單解析器測試
-  - [ ] 端到端整合測試
-- [ ] 建立性能基準測試
-- [ ] 錯誤情況處理測試
+### Testing
+- [ ] Build a complete unit test suite
+  - [ ] ItemParser tests
+  - [ ] AddressNormalizer tests  
+  - [ ] Order parser tests
+  - [ ] End-to-end integration tests
+- [ ] Build performance benchmarks
+- [ ] Error-case handling tests
 
-### 監控與日誌
-- [ ] 改善 Langfuse 追蹤配置
-- [ ] 新增詳細的除錯日誌
-- [ ] 實現健康檢查端點
-- [ ] 新增監控指標
+### Monitoring and logging
+- [ ] Improve the Langfuse tracing configuration
+- [ ] Add detailed debug logging
+- [ ] Implement a health-check endpoint
+- [ ] Add monitoring metrics
 
-## 📱 LINE Bot 功能
+## 📱 LINE Bot Features
 
-### 核心功能
-- [ ] 測試 LINE Bot Webhook 整合
-- [ ] 驗證訂單確認流程
-- [ ] 測試多訂單處理流程
-- [ ] 寄件人選填功能測試
+### Core features
+- [ ] Test the LINE Bot webhook integration
+- [ ] Verify the order confirmation flow
+- [ ] Test the multi-order processing flow
+- [ ] Test the optional sender field
 
-### 用戶體驗
-- [ ] 改善錯誤訊息提示
-- [ ] 新增使用說明與範例
-- [ ] 實現訂單狀態查詢
-- [ ] 新增常見問題處理
+### User experience
+- [ ] Improve error messages
+- [ ] Add usage instructions and examples
+- [ ] Implement order status lookup
+- [ ] Add FAQ handling
 
-## 🚀 部署與維運
+## 🚀 Deployment and Operations
 
-### 部署準備
-- [ ] Docker 容器化設定
-- [ ] 環境變數配置檢查
-- [ ] 資料庫遷移腳本 (如需要)
-- [ ] CI/CD 流程設定
+### Deployment prep
+- [ ] Docker containerization
+- [ ] Environment variable configuration check
+- [ ] Database migration scripts (if needed)
+- [ ] CI/CD pipeline setup
 
-### 文檔
-- [ ] API 文檔更新
-- [ ] 部署指南撰寫  
-- [ ] 故障排除指南
-- [ ] 用戶使用手冊
+### Documentation
+- [ ] Update API docs
+- [ ] Write a deployment guide  
+- [ ] Troubleshooting guide
+- [ ] User manual
 
-## 🔍 代碼品質
+## 🔍 Code Quality
 
-### 重構與優化
-- [ ] 代碼結構重構評估
-- [ ] 性能瓶頸分析
-- [ ] 記憶體使用優化
-- [ ] 依賴項目更新
+### Refactoring and optimization
+- [ ] Assess code structure refactoring
+- [ ] Performance bottleneck analysis
+- [ ] Memory usage optimization
+- [ ] Dependency updates
 
-### 安全性
-- [ ] API Key 安全性檢查
-- [ ] 輸入驗證加強
-- [ ] 錯誤訊息敏感資訊過濾
-- [ ] 速率限制實現
-
----
-
-## 📝 使用說明
-
-### 如何使用此清單：
-1. ✅ 已完成的項目會標記為已勾選
-2. 🔄 進行中的項目請在前面加上 `[🔄]`
-3. ❌ 遇到問題的項目請在前面加上 `[❌]` 並在後面註明問題
-4. 📝 需要更多資訊的項目請在後面加上註解
-
-### 優先級說明：
-- **高優先級**: 影響核心功能，需立即處理
-- **中優先級**: 改善用戶體驗，建議盡快處理  
-- **低優先級**: 優化性項目，時間允許時處理
-
-### 當前分支焦點：
-🎯 **fix/item-parsing-bugs**: 專注於修正品項解析相關的 bug 和改善功能
+### Security
+- [ ] API key security review
+- [ ] Stronger input validation
+- [ ] Filter sensitive info out of error messages
+- [ ] Implement rate limiting
 
 ---
 
-*最後更新: 2025-08-01*
-*維護者: Claude Code Assistant*
+## 📝 How to Use
+
+### How to use this list:
+1. ✅ Completed items are checked off
+2. 🔄 Prefix in-progress items with `[🔄]`
+3. ❌ Prefix items that hit problems with `[❌]` and describe the problem after it
+4. 📝 Add a note after items that need more information
+
+### Priority levels:
+- **High priority**: affects core functionality; handle immediately
+- **Medium priority**: improves user experience; handle soon  
+- **Low priority**: optimizations; handle when time allows
+
+### Current branch focus:
+🎯 **fix/item-parsing-bugs**: focused on fixing item-parsing bugs and improving the feature
+
+---
+
+*Last updated: 2025-08-01*
+*Maintainer: Claude Code Assistant*

@@ -31,18 +31,18 @@
 </head>
 <body class="bg-gray-50 font-sans">
     <div class="container mx-auto px-4 py-6 max-w-4xl">
-        <!-- 標題區 -->
+        <!-- Header -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <h1 class="text-2xl font-bold text-gray-800 text-center">📝 訂單編輯</h1>
             <p class="text-gray-600 text-center mt-2">請修改需要調整的訂單資訊</p>
         </div>
 
-        <!-- 訂單列表 -->
+        <!-- Order list -->
         <div id="orders-container">
-            <!-- 動態載入訂單卡片 -->
+            <!-- Order cards are loaded dynamically -->
         </div>
 
-        <!-- 操作按鈕 -->
+        <!-- Action buttons -->
         <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4">
             <div class="max-w-4xl mx-auto flex gap-3">
                 <button id="save-btn" class="save-button text-white px-6 py-3 rounded-lg font-semibold flex-1 hover:shadow-lg transition-all duration-300">
@@ -54,7 +54,7 @@
             </div>
         </div>
 
-        <!-- 載入中遮罩 -->
+        <!-- Loading overlay -->
         <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
             <div class="bg-white p-6 rounded-lg">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
@@ -68,14 +68,14 @@
         let userId = '';
         let sessionId = '';
 
-        // 在初始化前先保存 session 參數（支援多種來源）
+        // Save the session parameter before init (supports several sources)
         function preserveSessionId() {
             const urlParams = new URLSearchParams(window.location.search);
             
-            // 優先從 sessionId 參數取得（LIFF URL 攜帶）
+            // Prefer the sessionId parameter (carried by the LIFF URL)
             let sessionId = urlParams.get('sessionId');
             
-            // 次要從 session 參數取得（相容舊版）
+            // Fall back to the session parameter (legacy compatibility)
             if (!sessionId) {
                 sessionId = urlParams.get('session');
             }
@@ -86,29 +86,29 @@
             }
         }
 
-        // 頁面載入時立即保存 session
+        // Save the session as soon as the page loads
         preserveSessionId();
 
-        // LIFF 初始化
+        // LIFF initialization
         liff.init({
-            liffId: '{{LIFF_ID}}' // 需要替換為實際的 LIFF ID
+            liffId: '{{LIFF_ID}}' // Must be replaced with the real LIFF ID
         }).then(() => {
-            console.log('LIFF 初始化成功');
+            console.log('LIFF initialized');
             
             if (liff.isLoggedIn()) {
-                console.log('用戶已登入');
+                console.log('User is logged in');
                 liff.getProfile().then(profile => {
                     userId = profile.userId;
                     loadOrderData();
                 }).catch(err => {
-                    console.warn('獲取用戶資料失敗，使用默認用戶:', err);
+                    console.warn('Failed to get user profile, using default user:', err);
                     userId = 'default_user';
                     loadOrderData();
                 });
             } else {
-                console.log('用戶未登入，準備登入...');
+                console.log('User not logged in, starting login...');
                 
-                // 使用 OAuth2 state 參數攜帶 session ID（推薦做法）
+                // Carry the session ID in the OAuth2 state parameter (recommended)
                 const storedSessionId = localStorage.getItem('liff_session_id');
                 const urlParams = new URLSearchParams(window.location.search);
                 const currentSessionId = urlParams.get('sessionId') || urlParams.get('session') || storedSessionId;
@@ -117,19 +117,19 @@
                 console.log('Clean redirect URI:', window.location.origin + window.location.pathname);
                 
                 liff.login({
-                    redirectUri: window.location.origin + window.location.pathname,  // 乾淨的 URL
-                    state: currentSessionId || ''  // session ID 透過 OAuth state 攜帶
+                    redirectUri: window.location.origin + window.location.pathname,  // Clean URL
+                    state: currentSessionId || ''  // Session ID is carried via OAuth state
                 });
             }
         }).catch(err => {
-            console.error('LIFF 初始化失敗:', err);
-            console.log('可能在非 LINE 環境中運行，嘗試直接載入資料...');
-            // 如果是在瀏覽器中測試（非 LINE 環境），直接載入資料
+            console.error('LIFF initialization failed:', err);
+            console.log('Probably running outside LINE, trying to load data directly...');
+            // When testing in a regular browser (not LINE), load the data directly
             userId = 'test_user';
             loadOrderData();
         });
 
-        // 從 URL 參數載入訂單資料
+        // Load order data from the URL parameters
         function loadOrderData() {
             const urlParams = new URLSearchParams(window.location.search);
             sessionId = urlParams.get('session');
@@ -138,24 +138,24 @@
             console.log('URL Params:', urlParams.toString());
             console.log('Session ID from URL:', sessionId);
             
-            // 多重來源取得 session ID（優先順序：URL → OAuth state → localStorage）
+            // Get the session ID from several sources (priority: URL -> OAuth state -> localStorage)
             if (!sessionId) {
-                // 方法1：從 OAuth state 參數取得（登入回調後）
+                // Method 1: from the OAuth state parameter (after the login callback)
                 const state = urlParams.get('state');
                 if (state) {
                     sessionId = state;
                     console.log('Session ID from OAuth state:', sessionId);
-                    // 存儲到 localStorage 以備後用
+                    // Store in localStorage for later
                     localStorage.setItem('liff_session_id', sessionId);
                 }
                 
-                // 方法2：從 localStorage 讀取（降級方案）
+                // Method 2: read from localStorage (fallback)
                 if (!sessionId) {
                     sessionId = localStorage.getItem('liff_session_id');
                     console.log('Session ID from localStorage:', sessionId);
                 }
             } else {
-                // 如果 URL 中有 session，存儲到 localStorage 以備後用
+                // If the URL has a session, store it in localStorage for later
                 localStorage.setItem('liff_session_id', sessionId);
                 console.log('Saved session ID to localStorage:', sessionId);
             }
@@ -163,13 +163,13 @@
             if (!sessionId) {
                 console.error('Session ID not found in URL parameters');
                 
-                // 嘗試從 LIFF 上下文獲取參數
+                // Try to get the parameter from the LIFF context
                 if (typeof liff !== 'undefined' && liff.isInClient()) {
                     try {
                         const context = liff.getContext();
                         console.log('LIFF Context:', context);
                         
-                        // 檢查是否有其他方式獲取 session
+                        // Check for other ways to get the session
                         const hash = window.location.hash;
                         console.log('URL Hash:', hash);
                         
@@ -184,10 +184,10 @@
                 }
                 
                 if (!sessionId) {
-                    // 最後嘗試：檢查是否是 OAuth 回調，詢問用戶重新開始
+                    // Last resort: if this is an OAuth callback, ask the user to start over
                     if (urlParams.has('code') && urlParams.has('liffClientId')) {
                         if (confirm('登入成功，但會話已過期。是否重新開始訂單編輯流程？')) {
-                            // 清理 localStorage 並重定向到首頁
+                            // Clear localStorage and redirect to the home page
                             localStorage.removeItem('liff_session_id');
                             window.location.href = '/';
                             return;
@@ -199,7 +199,7 @@
                 }
             }
 
-            // 從後端 API 獲取訂單資料
+            // Fetch order data from the backend API
             fetch(`/api/liff/orders/${sessionId}`)
                 .then(response => response.json())
                 .then(data => {
@@ -211,12 +211,12 @@
                     }
                 })
                 .catch(error => {
-                    console.error('載入訂單失敗:', error);
+                    console.error('Failed to load orders:', error);
                     alert('網路錯誤，請重試');
                 });
         }
 
-        // 渲染訂單卡片
+        // Render the order cards
         function renderOrders() {
             const container = document.getElementById('orders-container');
             container.innerHTML = '';
@@ -227,7 +227,7 @@
             });
         }
 
-        // 建立訂單卡片
+        // Build an order card
         function createOrderCard(order, index) {
             const card = document.createElement('div');
             card.className = 'order-card bg-white rounded-lg shadow-md p-6 mb-4';
@@ -237,7 +237,7 @@
                     📦 訂單 ${index + 1}
                 </h3>
                 
-                <!-- 收件人資訊 -->
+                <!-- Receiver info -->
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-2">👤 收件人資訊</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -254,7 +254,7 @@
                     </div>
                 </div>
 
-                <!-- 地址 -->
+                <!-- Address -->
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-2">📍 收件地址</label>
                     <textarea class="field-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none"
@@ -263,7 +263,7 @@
                               onchange="updateOrder(${index}, 'shipping_address', this.value)">${order.shipping_address || ''}</textarea>
                 </div>
 
-                <!-- 商品項目 -->
+                <!-- Items -->
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-2">📦 商品項目</label>
                     <div id="items-container-${index}">
@@ -276,7 +276,7 @@
                     </button>
                 </div>
 
-                <!-- 發貨日期 -->
+                <!-- Shipping date -->
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-2">📅 發貨日期</label>
                     <input type="text" 
@@ -288,7 +288,7 @@
                     <p class="text-xs text-gray-500 mt-1">格式：月-日 (如：08-15)，留空表示當日發貨</p>
                 </div>
 
-                <!-- 寄件人資訊（選填）-->
+                <!-- Sender info (optional) -->
                 <details class="mb-4">
                     <summary class="text-sm font-medium text-gray-700 cursor-pointer hover:text-green-600">
                         🏢 寄件人資訊 (選填)
@@ -311,7 +311,7 @@
             return card;
         }
 
-        // 渲染商品項目
+        // Render the items
         function renderItemsForOrder(items, orderIndex) {
             return items.map((item, itemIndex) => `
                 <div class="flex items-center gap-2 mb-2">
@@ -335,12 +335,12 @@
             `).join('');
         }
 
-        // 更新訂單資料
+        // Update order data
         function updateOrder(orderIndex, field, value) {
             ordersData[orderIndex][field] = value;
         }
 
-        // 更新商品項目
+        // Update an item
         function updateOrderItem(orderIndex, itemIndex, field, value) {
             if (!ordersData[orderIndex].items) {
                 ordersData[orderIndex].items = [];
@@ -348,30 +348,30 @@
             ordersData[orderIndex].items[itemIndex][field] = value;
         }
 
-        // 新增商品項目
+        // Add an item
         function addNewItem(orderIndex) {
             if (!ordersData[orderIndex].items) {
                 ordersData[orderIndex].items = [];
             }
             ordersData[orderIndex].items.push({ name: '', quantity: 1 });
             
-            // 重新渲染該訂單的商品列表
+            // Re-render that order's item list
             const container = document.getElementById(`items-container-${orderIndex}`);
             container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
         }
 
-        // 移除商品項目
+        // Remove an item
         function removeItem(orderIndex, itemIndex) {
             ordersData[orderIndex].items.splice(itemIndex, 1);
             
-            // 重新渲染該訂單的商品列表
+            // Re-render that order's item list
             const container = document.getElementById(`items-container-${orderIndex}`);
             container.innerHTML = renderItemsForOrder(ordersData[orderIndex].items, orderIndex);
         }
 
-        // 儲存變更
+        // Save changes
         document.getElementById('save-btn').addEventListener('click', function() {
-            // 驗證資料
+            // Validate the data
             for (let i = 0; i < ordersData.length; i++) {
                 const order = ordersData[i];
                 if (!order.receiver_name || !order.receiver_phone || !order.shipping_address) {
@@ -384,10 +384,10 @@
                 }
             }
 
-            // 顯示載入中
+            // Show the loading overlay
             document.getElementById('loading-overlay').classList.remove('hidden');
 
-            // 發送更新請求
+            // Send the update request
             fetch(`/api/liff/orders/${sessionId}`, {
                 method: 'PUT',
                 headers: {
@@ -403,7 +403,7 @@
                 document.getElementById('loading-overlay').classList.add('hidden');
                 
                 if (data.success) {
-                    // 發送成功訊息到 LINE
+                    // Send a success message to LINE
                     liff.sendMessages([{
                         type: 'text',
                         text: `✅ 訂單更新成功！\n\n共更新了 ${ordersData.length} 筆訂單\n系統將自動處理並寫入 Google Sheets`
@@ -416,19 +416,19 @@
             })
             .catch(error => {
                 document.getElementById('loading-overlay').classList.add('hidden');
-                console.error('儲存失敗:', error);
+                console.error('Save failed:', error);
                 alert('網路錯誤，請重試');
             });
         });
 
-        // 取消按鈕
+        // Cancel button
         document.getElementById('cancel-btn').addEventListener('click', function() {
             if (confirm('確定要取消編輯嗎？所有變更將不會儲存。')) {
                 liff.closeWindow();
             }
         });
 
-        // 防止頁面意外關閉
+        // Guard against accidentally closing the page
         window.addEventListener('beforeunload', function(e) {
             e.preventDefault();
             e.returnValue = '您有未儲存的變更，確定要離開嗎？';

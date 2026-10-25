@@ -1,54 +1,54 @@
-# 訂單收集與彙整
+# Order Collection and Consolidation (訂單收集與彙整)
 
-接收禮盒訂單、依日期與品項彙整，並每日將明細主動送達老闆。訂單來源為 Google 表單，出貨資料落在 Google Sheets。
+Receives gift-box orders, consolidates them by date and item, and proactively delivers the details to the owner every day. Orders come from a Google Form; shipping data lives in Google Sheets.
 
 ## Language
 
-### 訂單
+### Orders
 
-**訂單**：
-一筆 Google 表單回覆。一位收件人、一個地址、一個出貨日，以及該次訂購的所有品項數量。
-_Avoid_: 單筆訂單／多筆訂單（來自舊的自由文字時代，表單一筆回覆即一張訂單，不存在「一次輸入含多張訂單」的情況）
+**Order (訂單)**:
+One Google Form response. One recipient, one address, one ship date, plus the quantities of every item ordered in that response.
+_Avoid_: single order / multiple orders (單筆訂單／多筆訂單) — a leftover from the old free-text era. One form response is exactly one order; there is no such thing as "one input containing several orders".
 
-**出貨日**：
-我方將訂單寄出的日期，含年份，由訂購者在表單上從固定選項中指定。**只有週三與週日是出貨日**，其餘日期不出貨。訂單依此日期分頁歸檔。
-_Avoid_: 到貨日、送達日（客人實際收到通常在出貨日之後，兩者不可混用）
+**Ship date (出貨日)**:
+The date we send the order out, including the year, chosen by the orderer on the form from a fixed set of options. **Only Wednesdays and Sundays are ship dates**; nothing ships on other days. Orders are filed into tabs by this date.
+_Avoid_: arrival date, delivery date (到貨日、送達日) — the customer usually receives the goods after the ship date, so the two must not be mixed up.
 
-**收件人**：
-實際收到貨的人。訂購者可能是別人（送禮情境），兩者不必相同。
-_Avoid_: 客戶、買家
+**Recipient (收件人)**:
+The person who actually receives the goods. The orderer may be someone else (gift scenario); the two need not be the same.
+_Avoid_: customer, buyer (客戶、買家)
 
-### 商品
+### Products
 
-**品項**：
-可被訂購的最小單位，由「類別」與「規格」的組合構成。目前共四種。
-_Avoid_: 商品、產品、SKU
+**Item (品項)**:
+The smallest orderable unit, made up of a combination of "category" and "grade". There are currently four.
+_Avoid_: goods, product, SKU (商品、產品、SKU)
 
-**類別**：
-包裝形式。目前有「家庭號」（一箱兩層 12 顆）與「精選禮盒」（一盒一層 6 顆）。
-_Avoid_: 產品類型、product type
+**Category (類別)**:
+The packaging form. Currently "家庭號" (family pack; one box, two layers, 12 fruits) and "精選禮盒" (select gift box; one box, one layer, 6 fruits).
+_Avoid_: product type (產品類型、product type)
 
-**規格**：
-果物等級，目前為 18A 與 20A。18A 對外稱「優惠首選」，20A 精選禮盒對外稱「大口滿足」。
-_Avoid_: 尺寸、大小、等級
+**Grade (規格)**:
+The fruit grade, currently 18A and 20A. 18A is marketed as "優惠首選" (best-value pick); the 20A select gift box is marketed as "大口滿足" (big-bite satisfaction).
+_Avoid_: size, dimensions, level (尺寸、大小、等級)
 
-**級距定價**：
-精選禮盒的價格依盒數整段報價，而非單價乘數量（2 盒 $1,910，不是 $1,020×2）。家庭號不適用，按箱線性計價。
-_Avoid_: 折扣、優惠價
+**Tiered pricing (級距定價)**:
+The select gift box is priced per box-count tier as a whole, not unit price times quantity (2 boxes are $1,910, not $1,020×2). Does not apply to the family pack, which is priced linearly per box.
+_Avoid_: discount, promotional price (折扣、優惠價)
 
-### 彙整與通知
+### Consolidation and notification
 
-**截單**：
-某個出貨日停止接受訂單的時點，落在該出貨日的前一天。截單後才進來的訂單歸入下一個出貨日。
+**Order cutoff (截單)**:
+The point at which a ship date stops accepting orders — the day before that ship date. Orders arriving after the cutoff go to the next ship date.
 
-**日報**：
-某一個出貨日的所有訂單，依品項加總後產出的明細，於截單後主動推送給老闆。實質上就是該出貨日的備貨與出貨作業清單。
-_Avoid_: 匯總報告、summary、報表（「匯總」是舊的 LINE 指令名稱，指的是同一件事的被動查詢版本）
+**Daily report (日報)**:
+The details produced by summing all orders for one ship date by item, pushed proactively to the owner after the cutoff. In practice it is the stock-prep and shipping work list for that ship date.
+_Avoid_: summary report, summary, report (匯總報告、summary、報表) — "匯總" is the name of the old LINE command, the passive on-demand-query version of the same thing.
 
-**日期分頁**：
-訂單總表（『表單回覆 1』）依配送日期拆出的分頁，同一個試算表檔案內，一個配送日一頁，分頁名稱即日期 `YYYY-MM-DD`。是總表的投影而非另一份資料：每次執行 `python organize_by_date.py --write` 都會整個重建，手動編輯會被覆蓋，要改請改總表。訂單改了配送日之後，原本那天的分頁會被清空。配送日期空白或無法解析的訂單集中在「未指定日期」分頁。
-_Avoid_: 備份、分表（不是複本，也不是可獨立編輯的資料來源）
+**Date tab (日期分頁)**:
+Tabs split out of the master order sheet (『表單回覆 1』) by delivery date, inside the same spreadsheet file — one tab per delivery date, with the tab name being the date `YYYY-MM-DD`. It is a projection of the master sheet, not separate data: every run of `python organize_by_date.py --write` rebuilds it entirely, so manual edits are overwritten — make changes in the master sheet instead. When an order's delivery date changes, the tab for its original day is cleared. Orders with a blank or unparseable delivery date are collected in the "未指定日期" (unspecified date) tab.
+_Avoid_: backup, sub-sheet (備份、分表) — it is neither a copy nor an independently editable data source.
 
-**出貨統計**：
-某個配送日要備多少貨的清單，附在該日期分頁的訂單列下方，一行一種「規格＋類別＋單筆數量」，例如 `20A 禮盒 1盒*2個地址`。「個地址」數的是訂單列數而非不重複地址數——一列就是一次出貨，同址兩張單要包兩份。
-_Avoid_: 品項匯總（那是舊 LINE 指令的說法，統計口徑不同）
+**Shipping tally (出貨統計)**:
+The list of how much stock to prepare for a given delivery date, appended below the order rows on that date tab. One line per "grade + category + per-order quantity", e.g. `20A 禮盒 1盒*2個地址` (20A gift box, 1 box × 2 addresses). "個地址" (addresses) counts order rows, not distinct addresses — one row is one shipment, so two orders to the same address mean packing two parcels.
+_Avoid_: item summary (品項匯總) — that is the old LINE command's term, and it counts differently.

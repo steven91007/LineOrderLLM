@@ -1,6 +1,7 @@
-"""日期分頁鎖定與匯入時的過期警告
+"""Date-tab locking and past-date warnings on import.
 
-出貨日已經過去的日期分頁不該再重建：貨已經出了，那份清單就是歷史紀錄。
+Date tabs whose shipping date has passed must not be rebuilt: the goods have
+shipped, so that list is a historical record.
 """
 
 from datetime import date, datetime
@@ -11,7 +12,7 @@ from src.handlers import discord_format as fmt
 from src.services.sheet_date_organizer import UNDATED_SHEET_NAME, is_past_sheet
 
 
-# ─────────────────────── 哪些分頁該鎖 ───────────────────────
+# ─────────────────────── Which tabs get locked ───────────────────────
 
 
 def test_past_date_sheets_are_locked():
@@ -21,20 +22,20 @@ def test_past_date_sheets_are_locked():
 
 
 def test_today_and_future_are_not_locked():
-    """今天當天還在出貨，不能鎖"""
+    """Today is still a shipping day, so it must not be locked."""
     today = date(2026, 8, 21)
     assert not is_past_sheet('2026-08-21', today)
     assert not is_past_sheet('2026-08-26', today)
 
 
 def test_non_date_sheets_are_never_locked():
-    """未指定日期會一直有新訂單進來，鎖了就更新不了"""
+    """The unspecified-date tab keeps receiving new orders; locking it would stop updates."""
     today = date(2026, 8, 21)
     assert not is_past_sheet(UNDATED_SHEET_NAME, today)
     assert not is_past_sheet('表單回覆 1', today)
 
 
-# ─────────────────────── 預覽呈現 ───────────────────────
+# ─────────────────────── Preview rendering ───────────────────────
 
 
 def make_organize_result(locked=(), stale=()):
@@ -71,7 +72,7 @@ def test_locked_sheets_are_marked_in_preview():
     locked_field = next(f for f in embed.fields if '2026-08-19' in f.name)
     assert '🔒' in locked_field.name
     assert '不會重建' in locked_field.name
-    # 沒鎖的分頁不該有鎖頭
+    # Unlocked tabs shouldn't show a lock icon
     other = next(f for f in embed.fields if '2026-08-23' in f.name)
     assert '🔒' not in other.name
 
@@ -99,18 +100,18 @@ def test_result_embed_reports_locked_count():
 
 
 def test_organize_preview_still_handles_missing_locked_key():
-    """舊的回傳形狀沒有 locked_sheets，不能 KeyError"""
+    """The old result shape has no locked_sheets; must not raise KeyError."""
     result = make_organize_result()
     del result['locked_sheets']
     embed, _ = fmt.organize_preview_embed(result)
     assert embed.fields
 
 
-# ─────────────────────── 匯入時的過期警告 ───────────────────────
+# ─────────────────────── Past-date warnings on import ───────────────────────
 
 
 def resolve(date_text: str, today: datetime):
-    """直接呼叫日期檢查，不建整個 importer（會連 Google）"""
+    """Call the date check directly without building the whole importer (which would connect to Google)."""
     from src.services.chat_log_importer import ChatLogImporter
 
     importer = ChatLogImporter.__new__(ChatLogImporter)
@@ -139,14 +140,14 @@ def test_future_shipping_day_is_clean():
 
 
 def test_past_and_offday_are_reported_together():
-    """兩個毛病都要講，不能只講一個"""
+    """Both problems must be reported, not just one."""
     _, problems = resolve('2026-08-18', TODAY)
     assert any('不是出貨日' in p for p in problems)
     assert any('已經過去' in p for p in problems)
 
 
 def test_past_date_does_not_block_writing():
-    """只警告不擋——補登舊訂單時還是要寫得進去"""
+    """Warn only, don't block -- back-filling old orders must still be writable."""
     from src.services.chat_log_importer import ParsedOrder
 
     _, problems = resolve('2026-08-16', TODAY)
@@ -154,15 +155,15 @@ def test_past_date_does_not_block_writing():
     assert parsed.status == 'review', '應該是需確認，不是被擋掉'
 
 
-# ─────────────────────── organize() 本身的路徑 ───────────────────────
+# ─────────────────────── organize() itself ───────────────────────
 #
-# 上面那些測試只驗了 is_past_sheet 和排版，從來沒跑過 organize() 本身，
-# 所以 organize() 裡把函式名打錯（NameError）不會被抓到——實際上就發生過一次。
-# 這裡用假的 client 把 dry_run 那條路整條跑完。
+# The tests above only cover is_past_sheet and formatting and never run organize() itself,
+# so a misspelled function name inside organize() (NameError) would go unnoticed; that actually happened once.
+# Here a fake client runs the whole dry_run path end to end.
 
 
 def make_organizer(sheet_names, existing=None):
-    """繞過 FormSheetClient，直接餵資料給 organize()"""
+    """Bypass FormSheetClient and feed data straight into organize()"""
     from src.services.sheet_date_organizer import SheetDateOrganizer
     from src.utils.form_options import FORM_COLUMNS
 
@@ -172,7 +173,7 @@ def make_organizer(sheet_names, existing=None):
         row[0] = '2026/08/20 10:00:00'
         row[5] = '王小明'
         row[8] = '20A 一盒 $1,150'
-        row[11] = name.replace('-', '/')      # 欲配送日期
+        row[11] = name.replace('-', '/')      # desired delivery date
         rows.append(row)
 
     organizer = SheetDateOrganizer.__new__(SheetDateOrganizer)
@@ -195,7 +196,7 @@ def make_organizer(sheet_names, existing=None):
 
 
 def test_organize_dry_run_runs_end_to_end():
-    """這條路徑跑得完，就抓得到 organize() 裡的 NameError"""
+    """If this path runs to completion, a NameError inside organize() gets caught"""
     organizer = make_organizer(['2026-08-19', '2026-08-23', '2026-08-26'])
     result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
     assert result['success']
@@ -215,17 +216,17 @@ def test_organize_locks_nothing_when_all_upcoming():
 
 
 def test_organize_does_not_treat_past_sheets_as_stale():
-    """已出貨的分頁沒有對應訂單也不算殘留，不能被清空"""
+    """A shipped date's tab with no matching orders is not stale and must not be cleared"""
     organizer = make_organizer(
-        ['2026-08-26'],                        # 總表只剩這天有訂單
-        existing=['2026-08-19', '2026-08-26'],  # 但試算表上還有已出貨的 08-19
+        ['2026-08-26'],                        # the master sheet only has orders on this day
+        existing=['2026-08-19', '2026-08-26'],  # but the spreadsheet still has the shipped 08-19 tab
     )
     result = organizer.organize(dry_run=True, today=date(2026, 8, 21))
     assert '2026-08-19' not in result['stale_sheets'], '已出貨的分頁不該被清空'
 
 
 def test_organize_still_clears_genuinely_stale_upcoming_sheets():
-    """未出貨但已無訂單的分頁（客人改了日期），還是要清掉"""
+    """An unshipped tab that no longer has orders (the customer changed the date) must still be cleared"""
     organizer = make_organizer(
         ['2026-08-26'],
         existing=['2026-08-23', '2026-08-26'],

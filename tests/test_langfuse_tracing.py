@@ -1,10 +1,10 @@
-"""離線檢查 src/utils/langfuse_tracing.py 在 Langfuse Python SDK v4 上的行為
+"""Offline checks of src/utils/langfuse_tracing.py behavior on the Langfuse Python SDK v4
 
-不連任何 Langfuse 伺服器：用 OpenTelemetry 的 InMemorySpanExporter 接住 SDK 產生的 span，
-檢查 v4 觀測優先（observations-first）資料模型需要的東西都有到位：
-- root observation 帶 input／output
-- propagate_attributes 讓 session_id 落在 root 與所有子 observation 上
-- 停用時所有 API 都是無操作，且呼叫端例外照樣往外拋
+Does not connect to any Langfuse server: OpenTelemetry's InMemorySpanExporter captures the spans the SDK produces,
+and the tests check that everything the v4 observations-first data model needs is in place:
+- the root observation carries input/output
+- propagate_attributes puts session_id on the root and on every child observation
+- when disabled, every API is a no-op and caller exceptions still propagate
 """
 import importlib
 import os
@@ -12,20 +12,20 @@ import os
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-SESSION_ATTR = "session.id"  # SDK v4 把 session 寫成每個 observation 的 OTel 屬性
+SESSION_ATTR = "session.id"  # SDK v4 writes the session as an OTel attribute on every observation
 
 
 @pytest.fixture
 def tracing(monkeypatch):
-    """每個測試都拿到乾淨的模組狀態，並把 SDK 的 span 導到記憶體"""
+    """Give every test a clean module state and route the SDK's spans to memory"""
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
-    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://localhost:9")  # 永遠不會被連線
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://localhost:9")  # never actually connected to
 
     from langfuse import Langfuse
     from langfuse._client.resource_manager import LangfuseResourceManager
 
-    # SDK 以 public key 為 key 快取 client（含它的 exporter）；清掉才能讓每個測試拿到自己的 exporter
+    # The SDK caches the client (and its exporter) keyed by public key; clear it so each test gets its own exporter
     with LangfuseResourceManager._lock:
         LangfuseResourceManager._instances.clear()
 
@@ -36,7 +36,7 @@ def tracing(monkeypatch):
     import src.utils.langfuse_tracing as module
 
     module = importlib.reload(module)
-    module.exporter = exporter  # 方便測試取用
+    module.exporter = exporter  # exposed for the tests
     yield module
     module.flush()
 
@@ -49,7 +49,7 @@ def _spans(tracing):
 def test_setup_enables_tracing_and_dspy_instrumentor(tracing):
     assert tracing.setup() is True
     assert tracing.is_enabled()
-    assert tracing.setup() is True  # 重複呼叫安全
+    assert tracing.setup() is True  # calling again is safe
 
 
 def test_root_observation_carries_input_output_and_session(tracing):
@@ -66,7 +66,7 @@ def test_root_observation_carries_input_output_and_session(tracing):
     assert root.attributes["langfuse.observation.type"] == "span"
     assert "raw" in root.attributes["langfuse.observation.input"]
     assert "row" in root.attributes["langfuse.observation.output"]
-    # v4：session 必須在每一個 observation 上，root 與子 span 都要有
+    # v4: the session must be on every observation, both the root and the child spans
     assert root.attributes[SESSION_ATTR] == "王小明｜0912｜2026-10-01"
     assert child.attributes[SESSION_ATTR] == "王小明｜0912｜2026-10-01"
 

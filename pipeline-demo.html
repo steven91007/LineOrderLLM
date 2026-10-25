@@ -188,8 +188,9 @@ function el(t, c, txt) { const e = document.createElement(t);
   if (c) e.className = c; if (txt !== undefined && txt !== null)
     e.textContent = txt; return e; }
 
-/* 電話與末五碼在畫面上可遮蔽；本 demo 的人名電話都是自編的，
-   但 pipeline 真的跑過的資料仍照遮蔽處理，示範資料外洩的防線。 */
+/* Phone numbers and last-five-digit transfer codes can be masked on screen. The names
+   and phones in this demo are made up, but data the pipeline actually processed is still
+   masked, to demonstrate the guard against data leaks. */
 const PII = [/\b09\d{2}-?\d{3}-?\d{3}\b/g, /\b0\d{1,2}-?\d{6,8}\b/g];
 function pii(text) {
   const span = el("span");
@@ -215,7 +216,7 @@ function pii(text) {
   return span;
 }
 
-/* 顯示值：預設英文對照，勾選後切回 pipeline 真正輸出的中文原文 */
+/* Display value: English gloss by default; when ticked, switch back to the Chinese original the pipeline actually outputs */
 let showZh = false;
 function T(obj, field) {
   if (showZh) return obj[field];
@@ -236,7 +237,7 @@ function badge(status) {
   return el("span", "badge b-" + status, status);
 }
 
-/* 極簡三色上色：先切出字串與註解，剩下的才上關鍵字，避免互相污染 */
+/* Minimal three-color highlighting: cut out strings and comments first, then color keywords in the rest, so they don't contaminate each other */
 function hlPy(src) {
   const KW = /\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|in|not|and|or|None|True|False|continue|break|import|from|lambda|raise|pass|yield)\b/g;
   const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");

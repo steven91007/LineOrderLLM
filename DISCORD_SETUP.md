@@ -1,97 +1,98 @@
-# Discord 訂單機器人設定
+# Discord Order Bot Setup
 
-直接**私訊機器人**貼上聊天紀錄（或丟 `.txt` 檔），它會解析成訂單、顯示預覽，
-按下按鈕才寫入 Google 試算表。另外提供 `/organize` 把總表依出貨日拆成日期分頁。
+**DM the bot** and paste a chat log (or drop in a `.txt` file). It parses it into orders, shows a preview,
+and only writes to the Google spreadsheet when you press a button. It also provides `/organize`, which splits
+the master sheet into per-date tabs by shipping date.
 
-功能等同於原本的 `chat_import_gui.py`（本機網頁）和 `organize_by_date.py`（CLI），
-差別是可以從手機操作。那兩個工具都保留，沒有被取代。
+It does the same job as the existing `chat_import_gui.py` (local web page) and `organize_by_date.py` (CLI);
+the difference is that you can run it from your phone. Both of those tools are still there and have not been replaced.
 
 ---
 
-## 兩種用法
+## Two Ways to Use It
 
-| | **私訊（建議）** | 指定頻道 |
+| | **DM (recommended)** | Designated channel |
 |---|---|---|
-| 需要開 MESSAGE CONTENT INTENT | **不用** | 要 |
-| 誰看得到客戶資料 | 只有你 | 頻道成員 |
-| 要設 `DISCORD_ORDER_CHANNEL_ID` | 不用 | 要 |
+| Requires MESSAGE CONTENT INTENT | **No** | Yes |
+| Who can see customer data | Only you | Channel members |
+| Requires `DISCORD_ORDER_CHANNEL_ID` | No | Yes |
 
-**私訊比較簡單也比較安全**，少一個最容易踩的設定，客戶的姓名電話地址也不會出現在頻道裡。
+**DMs are simpler and safer**: you skip the setting people most often get wrong, and customers' names, phone numbers and addresses never show up in a channel.
 
-不管用哪一種，**都得先把機器人加進一個伺服器**——Discord 規定要和機器人有共同的伺服器
-才能私訊它。伺服器只是張通行證，加完之後你可以完全不在頻道裡用。
+Either way, **you must first add the bot to a server**. Discord requires you to share a server with a bot
+before you can DM it. The server is just a pass; once the bot is added you never have to use it in a channel.
 
 ---
 
-## 一、建立 Discord 應用程式
+## 1. Create the Discord Application
 
-1. 到 [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**
-2. 左側 **Bot** → **Reset Token** → 複製 token（只會顯示一次）
-3. 左側 **OAuth2 → URL Generator**：
-   - Scopes 勾 **`bot`** 和 **`applications.commands`**
-   - Bot Permissions 勾：View Channels、Send Messages、Embed Links、Attach Files、
-     Read Message History、Add Reactions
-   - 複製產生的網址，在瀏覽器打開，把機器人加進你的伺服器
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**
+2. In the left sidebar, **Bot** → **Reset Token** → copy the token (it is shown only once)
+3. In the left sidebar, **OAuth2 → URL Generator**:
+   - Under Scopes, check **`bot`** and **`applications.commands`**
+   - Under Bot Permissions, check: View Channels, Send Messages, Embed Links, Attach Files,
+     Read Message History, Add Reactions
+   - Copy the generated URL, open it in a browser, and add the bot to your server
 
-> **只有要在頻道裡用才需要這一步**：Bot 頁面往下捲到 **Privileged Gateway Intents**
-> → 開啟 **MESSAGE CONTENT INTENT**。
-> 純私訊用法不用開，程式也不會去要求它。
+> **Only needed if you want to use it in a channel**: on the Bot page, scroll down to **Privileged Gateway Intents**
+> → enable **MESSAGE CONTENT INTENT**.
+> For DM-only use you do not need it, and the program will not request it.
 
-## 二、取得你的使用者 ID
+## 2. Get Your User ID
 
-Discord → 使用者設定 → 進階 → 開啟**開發者模式**，然後右鍵自己的頭像 → **複製使用者 ID**。
+Discord → User Settings → Advanced → enable **Developer Mode**, then right-click your own avatar → **Copy User ID**.
 
-（要在頻道用的話，順便右鍵那個頻道 → 複製頻道 ID。）
+(If you want to use a channel, also right-click that channel → Copy Channel ID.)
 
-## 三、設定 `.env`
+## 3. Configure `.env`
 
 ```bash
-# 解析用（和現有的 LINE bot 共用）
+# For parsing (shared with the existing LINE bot)
 OPENAI_API_KEY=sk-...
 DSPY_MODEL=gpt-5.6-luna
 
-# Google 試算表（和現有工具共用）
-GOOGLE_SHEETS_ID=你的試算表 ID
+# Google spreadsheet (shared with the existing tools)
+GOOGLE_SHEETS_ID=your spreadsheet ID
 GOOGLE_SHEETS_CREDENTIALS_PATH=credentials.json
 
 # Discord
-DISCORD_BOT_TOKEN=你的 bot token
-DISCORD_AUTHORIZED_USERS=你的使用者 ID      # 逗號分隔多人
-DISCORD_GUILD_ID=你的伺服器 ID              # 選填，設了斜線指令在該伺服器立即生效
+DISCORD_BOT_TOKEN=your bot token
+DISCORD_AUTHORIZED_USERS=your user ID      # comma-separated for multiple people
+DISCORD_GUILD_ID=your server ID              # optional; if set, slash commands take effect immediately in that server
 
-# 只有想在頻道裡用才需要，留空＝只走私訊
+# Only needed if you want to use a channel; leave empty = DMs only
 DISCORD_ORDER_CHANNEL_ID=
 ```
 
-`DISCORD_AUTHORIZED_USERS` **留空會直接拒絕啟動**，不會變成允許所有人。
-這支機器人會寫進正式的訂單試算表，fail-open 等於讓任何人都能下單。
-別人私訊機器人也沒用，不在名單裡就會被擋掉。
+If `DISCORD_AUTHORIZED_USERS` is **empty, the bot refuses to start**; it does not fall back to allowing everyone.
+This bot writes to the real order spreadsheet, and failing open would let anyone place orders.
+Other people DMing the bot gets them nowhere either: anyone not on the list is blocked.
 
-注意 `DISCORD_AUTHORIZED_USERS` 和 LINE 的 `AUTHORIZED_USERS` 是**兩個不同的變數**，
-因為兩邊的使用者 ID 是不同的 ID 空間，混在一起會無法判斷某個 ID 是誰。
+Note that `DISCORD_AUTHORIZED_USERS` and LINE's `AUTHORIZED_USERS` are **two separate variables**,
+because the two platforms' user IDs live in different ID spaces; mixing them would make it impossible to tell whose ID is whose.
 
-## 四、啟動
+## 4. Start It
 
 ```bash
-# 先檢查設定（不會連線），會告訴你目前是私訊模式還是頻道模式
+# Check the configuration first (does not connect); tells you whether it is in DM mode or channel mode
 uv run python discord_bot.py --check
 
-# 啟動
+# Start
 uv run python discord_bot.py
 ```
 
 ---
 
-## 怎麼用
+## How to Use It
 
-### 匯入訂單
+### Importing orders
 
-**私訊機器人**，直接貼上聊天紀錄，或把 LINE 匯出的 `.txt` 拖進去。
+**DM the bot** and paste the chat log directly, or drag in the `.txt` exported from LINE.
 
-LINE 的匯出檔通常遠超過 Discord 的 2000 字訊息上限，所以檔案上傳是主要用法。
-編碼會自動判斷（UTF-8-BOM／UTF-16／cp950／UTF-8），Windows 匯出的檔不用先轉檔。
+LINE export files are usually far over Discord's 2000-character message limit, so file upload is the main way to use it.
+The encoding is detected automatically (UTF-8-BOM / UTF-16 / cp950 / UTF-8), so Windows exports do not need converting first.
 
-機器人會回：
+The bot replies with something like the following (the bot's actual Chinese output; roughly: "Parsing… / Parse complete / Chat log import preview / 5 orders total / Status: 3 writable, 1 needs review, 1 already exists / The 1 existing order will not be written, even if you press 'include needs-review'… / (per-order details) / Please confirm which orders to write." and the buttons "Write writable (3)", "Include needs-review (4)", "Cancel"):
 
 ```
 🤖 解析中…（chat-0821.txt（8,432 字元），模型 gpt-5.6-luna）已跑 30 秒
@@ -110,71 +111,73 @@ LINE 的匯出檔通常遠超過 Discord 的 2000 字訊息上限，所以檔案
 [ 寫入可寫入的 (3) ] [ 含需確認 (4) ] [ 取消 ]
 ```
 
-匯入時出貨日如果**早於今天**，也會被標成「需確認」並說明原因（多半是模型把
-「上週三」之類的相對日期算錯）。只警告不擋，補登舊訂單還是寫得進去。
+If a shipping date is **earlier than today** at import time, the order is also marked 「需確認」 ("needs review") with the reason
+(usually the model miscalculated a relative date such as 「上週三」, "last Wednesday"). This only warns and does not block, so backfilling old orders still works.
 
-- **寫入可寫入的**：只寫沒有問題的訂單
-- **含需確認**：連同被標記需人工確認的一起寫入。數字是「可寫入 + 需確認」的總和
-- **已存在的訂單永遠不會被寫入**，按哪個按鈕都一樣。這是為了避免同一筆訂單重複下單；
-  真的要重寫請直接編輯總表
+- **寫入可寫入的 (Write writable)**: writes only the orders with no problems
+- **含需確認 (Include needs-review)**: also writes the orders flagged for manual review. The number is the sum of "writable + needs review"
+- **Orders that already exist are never written**, no matter which button you press. This prevents the same order from being placed twice;
+  if you really need to rewrite one, edit the master sheet directly
 
-訂單超過 10 筆時，明細只顯示前 10 筆，完整內容會以 `匯入預覽.txt` 附件送出。
+When there are more than 10 orders, the details show only the first 10, and the full content is sent as an attachment named `匯入預覽.txt` ("import preview").
 
-### 不會觸發解析的訊息
+### Messages that do not trigger parsing
 
-每一則訊息都可能觸發一次數分鐘、要花錢的解析，所以有這些過濾：
+Every message could trigger a parse that takes several minutes and costs money, so these filters apply:
 
-| 情況 | 行為 |
+| Case | Behavior |
 |---|---|
-| 機器人自己的訊息 | 忽略 |
-| 未授權的使用者 | 只加上 🚫 反應 |
-| 伺服器頻道，但不是指定的那個 | 完全忽略 |
-| 以 `#` 開頭 | 忽略（方便你做註記） |
-| 少於 20 個字 | 忽略 |
-| 正在解析另一批 | 回覆「請等這批完成再貼」，不排隊 |
+| The bot's own messages | Ignored |
+| Unauthorized user | Only a 🚫 reaction is added |
+| A server channel that is not the designated one | Completely ignored |
+| Starts with `#` | Ignored (handy for leaving notes) |
+| Fewer than 20 characters | Ignored |
+| Another batch is currently being parsed | Replies 「請等這批完成再貼」 ("please wait for this batch to finish before pasting"); no queueing |
 
-### 整理日期分頁
-
-```
-/organize                  # 用預設來源分頁「表單回覆 1」
-/organize source:其他分頁   # 指定來源分頁
-```
-
-私訊裡也能用。會先顯示預覽（每個日期分頁的訂單數和出貨統計），確認後才寫入。
-**要被清空的分頁會標成橘色並列出來**——日期分頁是總表的投影，未出貨的分頁每次執行
-都會整個重建，所以這一步是破壞性的。
-
-**出貨日已經過去的分頁會自動鎖定**（預覽裡標 🔒）：
-
-- `/organize` 不再重建它，內容維持出貨當下的樣子
-- 在 Google Sheets 上加保護，手動編輯時會跳出提醒（用 warningOnly，不會把任何人
-  鎖在外面，包含這支程式用的服務帳號）
-- 已出貨的分頁也不會被當成「殘留」清空
-
-所以就算之後有人改了總表裡的舊訂單，出貨當天的那份清單也不會跟著變。
-
-### 揪出出貨日不對的訂單
+### Organizing date tabs
 
 ```
-/offday                # 只列今天以後的
-/offday all:true       # 連已經過去的一起列（盤點用）
-/offday source:其他分頁 # 指定來源分頁
+/organize                  # uses the default source tab 「表單回覆 1」 ("Form Responses 1")
+/organize source:其他分頁   # specify a source tab (其他分頁 = "another tab")
 ```
 
-出貨日只有週三和週日，這個指令會掃過整張總表，列出三種有問題的訂單，
-並附上總表上的實際列號，可以直接跳過去改：
+This also works in DMs. It first shows a preview (the order count and shipping totals for each date tab) and only writes after you confirm.
+**Tabs that will be cleared are marked in orange and listed**: the date tabs are a projection of the master sheet, and every unshipped tab
+is fully rebuilt on each run, so this step is destructive.
 
-| 類型 | 意思 |
+**Tabs whose shipping date has already passed are locked automatically** (marked 🔒 in the preview):
+
+- `/organize` no longer rebuilds them, so their contents stay as they were on shipping day
+- Protection is added in Google Sheets so manual edits show a warning (using warningOnly, which does not lock anyone
+  out, including the service account this program uses)
+- Shipped tabs are also not treated as "leftovers" to be cleared
+
+So even if someone later edits old orders in the master sheet, the list from shipping day will not change with them.
+
+### Finding orders with the wrong shipping date
+
+```
+/offday                # list only today and later
+/offday all:true       # also list dates already past (for audits)
+/offday source:其他分頁 # specify a source tab
+```
+
+Shipping days are only Wednesday and Sunday. This command scans the whole master sheet and lists three kinds of problem orders,
+together with their actual row numbers in the master sheet so you can jump straight there to fix them:
+
+| Type (as shown by the bot) | Meaning |
 |---|---|
-| 非出貨日 | 有填日期，但不是週三或週日 |
-| 日期無法辨識 | 日期欄空白，或填了看不懂的東西（排不進日期分頁） |
-| 出貨日早於填表時間 | 填表當下出貨日就已經過去了，一定是填錯 |
+| 非出貨日 (not a shipping day) | A date is filled in, but it is not a Wednesday or Sunday |
+| 日期無法辨識 (date not recognized) | The date column is empty or contains something unparseable (cannot be placed in a date tab) |
+| 出貨日早於填表時間 (shipping date before form submission time) | The shipping date had already passed when the form was filled in, so it must be a mistake |
 
-「出貨日早於填表時間」**不受 `all` 參數影響**，一律列出來——這種列必然也早於今天，
-被過濾掉的話預設就永遠看不到，但它是資料填錯而不是排程問題。同一列可能同時出現在
-兩個區塊，那是兩個不同的毛病。
+「出貨日早於填表時間」 is **not affected by the `all` parameter** and is always listed: such rows are necessarily earlier than today too,
+so if they were filtered out you would never see them by default, yet they are data-entry errors rather than scheduling problems. The same row may appear in
+both sections; those are two different problems.
 
-只讀不寫，跑幾次都不會動到試算表。
+It is read-only, so you can run it as many times as you like without touching the spreadsheet.
+
+Sample output (the bot's Chinese output; e.g. 「第2列」 = "row 2", 「原文：下週都可以」 = "original text: any day next week works"):
 
 ```
 ⚠️ 出貨日需要處理的訂單
@@ -193,58 +196,58 @@ LINE 的匯出檔通常遠超過 Discord 的 2000 字訊息上限，所以檔案
 第6列　陳大寶　原文：下週都可以
 ```
 
-出貨日的定義在 `src/utils/shipping_days.py`，規則改了就改那個檔案，
-匯入時的檢查和這個指令會同時生效。
+Shipping days are defined in `src/utils/shipping_days.py`. If the rules change, edit that file;
+the import-time check and this command both pick up the change.
 
 ---
 
-## 疑難排解
+## Troubleshooting
 
-**私訊機器人沒反應**
-→ 確認你和機器人有共同的伺服器（Discord 規定），以及你的 ID 有在
-`DISCORD_AUTHORIZED_USERS` 裡。
+**The bot does not respond to DMs**
+→ Make sure you share a server with the bot (a Discord requirement) and that your ID is in
+`DISCORD_AUTHORIZED_USERS`.
 
-**斜線指令 `/organize` 在私訊裡找不到**
-→ 全域同步最多要等一小時才會出現，第一次啟動後請耐心等一下。
+**The `/organize` slash command does not show up in DMs**
+→ Global sync can take up to an hour to appear; be patient after the first startup.
 
-**在頻道貼文字沒反應，但丟 `.txt` 檔正常**
-→ 這是 MESSAGE CONTENT INTENT 沒開的典型症狀（附件不受這個限制，文字受）。
-到 Developer Portal → Bot → Privileged Gateway Intents 開啟它。私訊不受影響。
+**Pasting text in a channel does nothing, but dropping in a `.txt` works**
+→ This is the classic symptom of MESSAGE CONTENT INTENT not being enabled (attachments are not subject to it; text is).
+Go to Developer Portal → Bot → Privileged Gateway Intents and enable it. DMs are not affected.
 
-**啟動時報 PrivilegedIntentsRequired**
-→ 你設了 `DISCORD_ORDER_CHANNEL_ID` 但沒在 Developer Portal 開啟 MESSAGE CONTENT INTENT。
-要嘛去開啟，要嘛把 `DISCORD_ORDER_CHANNEL_ID` 清空改用私訊。
+**PrivilegedIntentsRequired at startup**
+→ You set `DISCORD_ORDER_CHANNEL_ID` but did not enable MESSAGE CONTENT INTENT in the Developer Portal.
+Either enable it, or clear `DISCORD_ORDER_CHANNEL_ID` and use DMs instead.
 
-**啟動時說設定不完整**
-→ 跑 `uv run python discord_bot.py --check`，它會列出缺哪些。
+**Startup says the configuration is incomplete**
+→ Run `uv run python discord_bot.py --check`; it lists what is missing.
 
-**寫入失敗，說欄位對不上**
-→ Google 表單的題目被改過，總表標題列和程式預期的不一致。先核對總表再重試。
+**Write fails, saying the columns do not match**
+→ The Google Form's questions were changed, so the master sheet's header row no longer matches what the program expects. Check the master sheet, then retry.
 
-**寫入失敗，429 / Quota**
-→ Google Sheets 每分鐘的寫入配額滿了，等一分鐘再重跑。日期分頁多的時候比較容易遇到。
+**Write fails with 429 / Quota**
+→ The Google Sheets per-minute write quota is used up; wait a minute and run it again. This is more likely when there are many date tabs.
 
-**機器人重新啟動後，舊的預覽按鈕按不動**
-→ 預覽只存在記憶體裡（裡面有客戶個資，刻意不落地），重啟就會失效。重新貼一次即可。
+**After the bot restarts, old preview buttons do nothing**
+→ Previews are kept only in memory (they contain customer personal data and are deliberately never written to disk), so a restart invalidates them. Just paste again.
 
-**解析卡住很久都沒結束**
-→ 目前沒辦法中斷執行中的解析，只能重啟機器人。解析中的期間其他匯入會被擋下。
+**Parsing has been stuck for a long time**
+→ There is currently no way to interrupt a running parse; you can only restart the bot. While a parse is running, other imports are blocked.
 
 ---
 
-## 相關檔案
+## Related Files
 
-| 路徑 | 內容 |
+| Path | Contents |
 |---|---|
-| `discord_bot.py` | 進入點 |
-| `src/handlers/discord_handler.py` | 訊息處理、併發控制、待確認狀態 |
-| `src/handlers/discord_views.py` | 按鈕介面 |
-| `src/handlers/discord_format.py` | embed／文字排版（純函式，可單測） |
-| `src/services/offday_orders.py` | `/offday` 的掃描邏輯（只讀不寫） |
-| `src/utils/shipping_days.py` | 出貨日的單一定義來源 |
+| `discord_bot.py` | Entry point |
+| `src/handlers/discord_handler.py` | Message handling, concurrency control, pending-confirmation state |
+| `src/handlers/discord_views.py` | Button UI |
+| `src/handlers/discord_format.py` | Embed / text layout (pure functions, unit-testable) |
+| `src/services/offday_orders.py` | Scan logic for `/offday` (read-only) |
+| `src/utils/shipping_days.py` | Single source of truth for shipping days |
 | `tests/test_discord_format.py` | `uv run pytest` |
 
-底層服務沒有任何改動，和以下工具共用同一套邏輯：
+The underlying services were not changed at all; they share the same logic with these tools:
 
-- `src/services/chat_log_importer.py` ← 也被 `chat_import_gui.py`、`import_chat_log.py` 使用
-- `src/services/sheet_date_organizer.py` ← 也被 `organize_by_date.py` 使用
+- `src/services/chat_log_importer.py` ← also used by `chat_import_gui.py` and `import_chat_log.py`
+- `src/services/sheet_date_organizer.py` ← also used by `organize_by_date.py`

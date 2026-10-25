@@ -1,5 +1,8 @@
 """
-DSPy 訂單解析客戶端
+DSPy order-parsing client.
+
+Note: the Chinese error / error_message strings are kept as-is because they are
+relayed to customers in LINE replies (see src/handlers/order_handler.py).
 """
 import dspy
 import json
@@ -13,37 +16,37 @@ from .taiwan_address import TaiwanAddressNormalizer
 from .dspy_modules.unified_parser import UnifiedOrderParser
 from .dspy_modules.validators import OrderValidator, JSONValidator
 
-# 啟用 Langfuse 追蹤（DSPy 的 LM 呼叫會自動記錄模型、token 與成本）
+# Enable Langfuse tracing (DSPy LM calls automatically record model, tokens and cost)
 init_tracing()
 
 class DSPyOrderClient:
-    """使用 DSPy 的訂單解析客戶端"""
+    """Order-parsing client built on DSPy"""
     
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", max_retries: int = 3):
         """
-        初始化 DSPy 客戶端
+        Initialize the DSPy client
         
         Args:
-            api_key: OpenAI API 金鑰
-            model: 使用的模型名稱
-            max_retries: 最大重試次數
+            api_key: OpenAI API key
+            model: name of the model to use
+            max_retries: maximum number of retries
         """
         self.api_key = api_key
         self.model = model
         self.max_retries = max_retries
         
-        # 配置 DSPy
+        # Configure DSPy
         self._configure_dspy()
         
-        # 初始化模組
+        # Initialize modules
         self.unified_parser = UnifiedOrderParser()
         self.validator = OrderValidator()
         self.json_validator = JSONValidator()
         self.address_normalizer = TaiwanAddressNormalizer()
     
     def _configure_dspy(self):
-        """配置 DSPy 設定"""
-        # 設定 OpenAI 作為語言模型
+        """Configure DSPy settings"""
+        # Use OpenAI as the language model
         lm = dspy.LM(
             model=self.model,
             api_key=self.api_key,
@@ -54,13 +57,13 @@ class DSPyOrderClient:
     
     def parse_order(self, order_text: str) -> Dict[str, Any]:
         """
-        解析訂單文字（統一處理，都返回陣列格式）
+        Parse order text (unified handling; always returns an array)
         
         Args:
-            order_text: 原始訂單文字
+            order_text: raw order text
             
         Returns:
-            Dict: 解析結果，包含 success, data, error 等欄位
+            Dict: parse result with success, data, error, etc.
         """
         if not order_text or not isinstance(order_text, str):
             return {
@@ -69,7 +72,7 @@ class DSPyOrderClient:
                 'data': None
             }
 
-        # 預處理文字
+        # Preprocess the text
         cleaned_text = self._preprocess_text(order_text)
 
         with observation(
@@ -77,25 +80,25 @@ class DSPyOrderClient:
             input=order_text,
             metadata={'model': self.model, 'max_retries': self.max_retries}
         ) as parse_span:
-            # 執行解析流程
+            # Run the parsing flow
             for attempt in range(self.max_retries):
                 try:
-                    # 使用統一解析器解析，傳入當前日期作為參考點
+                    # Parse with the unified parser, passing the current date as the reference point
                     current_date = datetime.now()
                     result = self.unified_parser(cleaned_text, reference_date=current_date)
                     parsed_orders = json.loads(result.orders_json)
 
-                    # 確保是陣列格式
+                    # Make sure it is an array
                     if not isinstance(parsed_orders, list):
                         parsed_orders = []
 
-                    # 驗證解析結果
+                    # Validate the parse result
                     with observation('validate-orders', input=parsed_orders) as validate_span:
                         validation_result = self._validate_parsed_orders(parsed_orders)
                         update_observation(validate_span, output=validation_result)
 
                     if validation_result['is_valid']:
-                        # 標準化地址
+                        # Normalize addresses
                         with observation('normalize-addresses') as normalize_span:
                             normalized_orders = self._normalize_addresses_in_orders(parsed_orders)
                             update_observation(
@@ -118,7 +121,7 @@ class DSPyOrderClient:
                             'raw_response': json.dumps(normalized_orders, ensure_ascii=False)
                         }
                     else:
-                        # 驗證失敗，但如果是最後一次嘗試，回傳錯誤
+                        # Validation failed; on the last attempt, return the error
                         if attempt == self.max_retries - 1:
                             error = f"驗證失敗: {validation_result.get('error_message', '未知錯誤')}"
                             update_observation(
@@ -135,7 +138,7 @@ class DSPyOrderClient:
                             }
 
                 except Exception as e:
-                    # 如果是最後一次嘗試，回傳錯誤
+                    # On the last attempt, return the error
                     if attempt == self.max_retries - 1:
                         error = f'DSPy 解析失敗: {str(e)}'
                         update_observation(
@@ -151,7 +154,7 @@ class DSPyOrderClient:
                             'data': None
                         }
 
-            # 所有嘗試都失敗
+            # All attempts failed
             error = '多次嘗試後仍然解析失敗，請檢查訂單格式'
             update_observation(
                 parse_span,
@@ -167,7 +170,7 @@ class DSPyOrderClient:
             }
     
     def _validate_parsed_orders(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """驗證解析後的訂單陣列"""
+        """Validate the parsed order array"""
         if not isinstance(orders, list):
             return {
                 'is_valid': False,
@@ -186,7 +189,7 @@ class DSPyOrderClient:
                 'error_message': '訂單數量超過限制（最多5份）'
             }
         
-        # 驗證每個訂單
+        # Validate each order
         for i, order in enumerate(orders):
             validation = self._validate_single_order_data(order)
             if not validation['is_valid']:
@@ -198,14 +201,14 @@ class DSPyOrderClient:
         return {'is_valid': True}
     
     def _validate_single_order_data(self, order: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證單一訂單資料"""
+        """Validate a single order's data"""
         if not isinstance(order, dict):
             return {
                 'is_valid': False,
                 'error_message': '訂單資料不是字典格式'
             }
         
-        # 必填欄位檢查
+        # Required-field check
         required_fields = ['receiver_name', 'receiver_phone', 'shipping_address', 'items']
         missing_fields = []
         
@@ -219,7 +222,7 @@ class DSPyOrderClient:
                 'error_message': f'缺少必填欄位: {", ".join(missing_fields)}'
             }
         
-        # 驗證電話號碼格式
+        # Validate phone number format
         phone_pattern = re.compile(r'^[\d\-\+\(\)\s]+$')
         if order.get('receiver_phone') and not phone_pattern.match(order['receiver_phone']):
             return {
@@ -233,7 +236,7 @@ class DSPyOrderClient:
                 'error_message': '寄件人電話格式不正確'
             }
         
-        # 驗證商品項目
+        # Validate items
         items = order.get('items', [])
         if not isinstance(items, list) or len(items) == 0:
             return {
@@ -257,11 +260,11 @@ class DSPyOrderClient:
         return {'is_valid': True}
     
     def _preprocess_text(self, text: str) -> str:
-        """預處理訂單文字"""
-        # 移除多餘的空白和換行
+        """Preprocess the order text"""
+        # Collapse extra whitespace and newlines
         text = re.sub(r'\s+', ' ', text.strip())
         
-        # 標準化常見的訂單關鍵字
+        # Normalize common order keywords
         replacements = {
             '寄件者': '寄件人',
             '收件者': '收件人', 
@@ -280,13 +283,13 @@ class DSPyOrderClient:
     
     def validate_parsed_order(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        驗證解析後的訂單資料（相容性介面）
+        Validate parsed order data (compatibility interface)
         
         Args:
-            parsed_data: 解析後的訂單資料（新格式：{'orders': [...], 'total_orders': N}）
+            parsed_data: parsed order data (new format: {'orders': [...], 'total_orders': N})
             
         Returns:
-            Dict: 驗證結果
+            Dict: validation result
         """
         if not isinstance(parsed_data, dict):
             return {
@@ -312,7 +315,7 @@ class DSPyOrderClient:
                 'error_message': '訂單數量不一致'
             }
         
-        # 使用新的驗證方法
+        # Use the new validation method
         validation_result = self._validate_parsed_orders(orders)
         
         if validation_result['is_valid']:
@@ -329,12 +332,12 @@ class DSPyOrderClient:
             }
     
     def _normalize_addresses_in_orders(self, orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """標準化訂單陣列中的地址"""
+        """Normalize the addresses in the order array"""
         normalized_orders = []
         
         for order in orders:
             if isinstance(order, dict) and 'shipping_address' in order and order['shipping_address']:
-                # 複製訂單以避免修改原始資料
+                # Copy the order to avoid mutating the original
                 normalized_order = order.copy()
                 normalized_order['shipping_address'] = self.address_normalizer.normalize_address(order['shipping_address'])
                 normalized_orders.append(normalized_order)

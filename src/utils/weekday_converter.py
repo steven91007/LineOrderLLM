@@ -1,14 +1,14 @@
 """
-星期幾轉換為日期的工具模組
+Utilities for converting weekday descriptions into dates
 """
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 
 class WeekdayConverter:
-    """將星期幾描述轉換為實際日期"""
+    """Convert weekday descriptions into actual dates"""
     
-    # 星期對應表
+    # Weekday lookup table
     WEEKDAY_MAP = {
         '星期一': 0, '週一': 0, '禮拜一': 0, 'monday': 0, 'mon': 0,
         '星期二': 1, '週二': 1, '禮拜二': 1, 'tuesday': 1, 'tue': 1,
@@ -23,69 +23,69 @@ class WeekdayConverter:
     @classmethod
     def get_next_weekday_date(cls, weekday_str: str, from_date: Optional[datetime] = None) -> Optional[str]:
         """
-        根據星期幾取得下一個該星期的日期
+        Get the date of the next occurrence of the given weekday
         
         Args:
-            weekday_str: 星期幾的描述（如：星期三、星期天）
-            from_date: 基準日期，預設為今天
+            weekday_str: Weekday description (e.g. 星期三, 星期天)
+            from_date: Reference date, defaults to today
             
         Returns:
-            日期字串 (MM-DD 格式) 或 None
+            Date string (MM-DD format) or None
         """
         if not weekday_str:
             return None
             
-        # 清理輸入
+        # Clean the input
         weekday_str = weekday_str.strip().lower()
         
-        # 查找對應的星期數字
+        # Look up the corresponding weekday number
         target_weekday = cls.WEEKDAY_MAP.get(weekday_str)
         if target_weekday is None:
             return None
         
-        # 取得基準日期
+        # Get the reference date
         if from_date is None:
             from_date = datetime.now()
         
-        # 計算目標日期
+        # Compute the target date
         current_weekday = from_date.weekday()
         
-        # 計算天數差異
+        # Compute the difference in days
         days_ahead = (target_weekday - current_weekday) % 7
         
-        # 如果是今天，通常指下週
+        # If it is today, it usually means next week
         if days_ahead == 0:
             days_ahead = 7
         
-        # 計算目標日期
+        # Compute the target date
         target_date = from_date + timedelta(days=days_ahead)
         
-        # 返回 MM-DD 格式
+        # Return in MM-DD format
         return target_date.strftime('%m-%d')
     
     @classmethod
     def parse_shipping_date(cls, date_str: str, from_date: Optional[datetime] = None) -> Optional[str]:
         """
-        解析發貨日期描述
+        Parse a shipping date description
         
         Args:
-            date_str: 日期描述（可能是星期幾或具體日期）
-            from_date: 基準日期
+            date_str: Date description (either a weekday or a specific date)
+            from_date: Reference date
             
         Returns:
-            標準化的日期字串 (MM-DD 格式) 或 None
+            Normalized date string (MM-DD format) or None
         """
         if not date_str:
             return None
         
         date_str = date_str.strip()
         
-        # 優先嘗試解析絕對日期格式
+        # Try absolute date formats first
         absolute_date = cls.parse_absolute_date(date_str)
         if absolute_date:
             return absolute_date
         
-        # 檢查是否為星期幾
+        # Check whether it is a weekday
         for weekday_name in cls.WEEKDAY_MAP.keys():
             if weekday_name in date_str.lower():
                 return cls.get_next_weekday_date(weekday_name, from_date)
@@ -95,13 +95,13 @@ class WeekdayConverter:
     @classmethod
     def parse_absolute_date(cls, date_str: str) -> Optional[str]:
         """
-        解析絕對日期格式，返回 MM-DD 格式
+        Parse absolute date formats and return MM-DD
         
         Args:
-            date_str: 日期字串（如：9/20, 9-20, 9月20日等）
+            date_str: Date string (e.g. 9/20, 9-20, 9月20日)
             
         Returns:
-            標準化的日期字串 (MM-DD 格式) 或 None
+            Normalized date string (MM-DD format) or None
         """
         if not date_str:
             return None
@@ -109,12 +109,12 @@ class WeekdayConverter:
         import re
         date_str = date_str.strip()
         
-        # 絕對日期格式匹配
+        # Absolute date format patterns
         absolute_patterns = [
-            (r'(\d{1,2})/(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9/20號 或 9/20
-            (r'(\d{1,2})-(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9-20號 或 9-20
+            (r'(\d{1,2})/(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9/20號 or 9/20
+            (r'(\d{1,2})-(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),    # 9-20號 or 9-20
             (r'(\d{1,2})月(\d{1,2})日?號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"), # 9月20日號
-            (r'(\d{1,2})\.(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),   # 9.20號 或 9.20
+            (r'(\d{1,2})\.(\d{1,2})號?', lambda m: f"{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"),   # 9.20號 or 9.20
             (r'(\d{2})-(\d{2})', lambda m: f"{m.group(1)}-{m.group(2)}"),                             # 09-20
             (r'(\d{2})/(\d{2})', lambda m: f"{m.group(1)}-{m.group(2)}"),                             # 09/20
         ]
@@ -124,7 +124,7 @@ class WeekdayConverter:
             if match:
                 try:
                     result = formatter(match)
-                    # 驗證月份和日期是否合理
+                    # Validate that the month and day are reasonable
                     month, day = result.split('-')
                     if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
                         return result
@@ -136,13 +136,13 @@ class WeekdayConverter:
     @classmethod
     def get_weekday_name(cls, date: datetime) -> str:
         """
-        取得日期對應的中文星期名稱
+        Get the Chinese weekday name for a date
         
         Args:
-            date: 日期物件
+            date: Date object
             
         Returns:
-            中文星期名稱
+            Chinese weekday name
         """
         weekday_names = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
         return weekday_names[date.weekday()]
@@ -150,19 +150,19 @@ class WeekdayConverter:
     @classmethod
     def format_date_with_weekday(cls, date_str: str) -> str:
         """
-        格式化日期字串，加上星期幾
+        Format a date string with its weekday appended
         
         Args:
-            date_str: MM-DD 格式的日期字串
+            date_str: Date string in MM-DD format
             
         Returns:
-            格式化後的字串（如：01-15 (星期三)）
+            Formatted string (e.g. 01-15 (星期三))
         """
         if not date_str or '-' not in date_str:
             return date_str
         
         try:
-            # 假設當前年份
+            # Assume the current year
             current_year = datetime.now().year
             month, day = date_str.split('-')
             date_obj = datetime(current_year, int(month), int(day))
@@ -172,11 +172,11 @@ class WeekdayConverter:
             return date_str
 
 
-# 測試用
+# For manual testing
 if __name__ == "__main__":
     converter = WeekdayConverter()
     
-    # 測試星期轉換
+    # Test weekday conversion
     test_cases = [
         "星期天",
         "星期三",
@@ -185,13 +185,13 @@ if __name__ == "__main__":
         "禮拜五"
     ]
     
-    print("測試星期轉換：")
+    print("Testing weekday conversion:")
     for test in test_cases:
         result = converter.get_next_weekday_date(test)
         print(f"  {test} -> {result}")
     
-    # 測試日期解析
-    print("\n測試日期解析：")
+    # Test date parsing
+    print("\nTesting date parsing:")
     test_dates = [
         "星期天",
         "1/15",
@@ -202,5 +202,5 @@ if __name__ == "__main__":
     
     for test in test_dates:
         result = converter.parse_shipping_date(test)
-        formatted = converter.format_date_with_weekday(result) if result else "無法解析"
+        formatted = converter.format_date_with_weekday(result) if result else "unparseable"
         print(f"  {test} -> {formatted}")

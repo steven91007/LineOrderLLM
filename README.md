@@ -1,63 +1,64 @@
-# LINE Bot 配置說明
+# LINE Bot Configuration
 
-## 設置步驟
+## Setup steps
 
-### 1. 啟動應用程式和 ngrok 隧道
+### 1. Start the application and the ngrok tunnel
 
 ```bash
-# 方法一：使用腳本啟動
+# Option 1: start with the script
 ./start_ngrok.sh
 
-# 方法二：分別啟動
-# 終端1：啟動 Flask 應用
+# Option 2: start them separately
+# Terminal 1: start the Flask app
 python main.py
 
-# 終端2：啟動 ngrok
+# Terminal 2: start ngrok
 ngrok http 5000
 ```
 
-### 2. 設定 LINE Bot Webhook URL
+### 2. Set the LINE Bot Webhook URL
 
-1. 啟動 ngrok 後，會看到類似這樣的輸出：
+1. After starting ngrok, you will see output like this:
    ```
    Forwarding: https://xxxx-xx-xx-xx-xx.ngrok-free.app -> http://localhost:5000
    ```
 
-2. 登入 [LINE Developers Console](https://developers.line.biz/)
+2. Log in to the [LINE Developers Console](https://developers.line.biz/)
 
-3. 選擇您的 Channel
+3. Select your Channel
 
-4. 在 Messaging API 標籤下找到 Webhook settings
+4. Find Webhook settings under the Messaging API tab
 
-5. 設定 Webhook URL 為：
+5. Set the Webhook URL to:
    ```
    https://xxxx-xx-xx-xx-xx.ngrok-free.app/callback
    ```
-   （將 xxxx-xx-xx-xx-xx 替換為您的 ngrok URL）
+   (replace xxxx-xx-xx-xx-xx with your ngrok URL)
 
-6. 啟用 "Use webhook"
+6. Enable "Use webhook"
 
-7. 點擊 "Verify" 測試連接
+7. Click "Verify" to test the connection
 
-### 3. 測試 LINE Bot
+### 3. Test the LINE Bot
 
-1. 掃描 QR code 將 Bot 加為好友
-2. 發送訊息測試回音功能
+1. Scan the QR code to add the Bot as a friend
+2. Send a message to test the echo function
 
-## 環境變數設定
+## Environment variables
 
-請確保 `.env` 檔案包含正確的設定：
+Make sure the `.env` file contains the correct settings:
 
 ```
-LINE_CHANNEL_ACCESS_TOKEN=您的Channel Access Token
-LINE_CHANNEL_SECRET=您的Channel Secret
+LINE_CHANNEL_ACCESS_TOKEN=your Channel Access Token
+LINE_CHANNEL_SECRET=your Channel Secret
 ```
 
-## 注意事項
+## Notes
 
-- ngrok 免費版的 URL 會在每次重啟時改變
-- 需要在 LINE Developers Console 更新新的 Webhook URL
-- 建議申請 ngrok 付費版以獲得固定 URL
-## gitkb：git 歷史知識庫
+- The free ngrok URL changes on every restart
+- You then need to update the Webhook URL in the LINE Developers Console
+- Consider a paid ngrok plan to get a fixed URL
 
-`knowledge/` 底下有每個 commit、每個檔案變更的摘要筆記（檔名是被摘要文字的 sha256），可用 `uv run python -m gitkb search / show / history / log` 查「這段程式為什麼長這樣」。新 commit 之後在 Claude Code 裡輸入 `/gitkb` 更新。詳見 `docs/agents/gitkb.md`。
+## gitkb: git history knowledge base
+
+`knowledge/` holds summary notes for every commit and every file change (each named by the sha256 of the summarized text). Use `uv run python -m gitkb search / show / history / log` to find out why code looks the way it does. After new commits, run `/gitkb` in Claude Code to update it. See `docs/agents/gitkb.md`.

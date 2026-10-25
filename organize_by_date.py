@@ -1,26 +1,29 @@
 #!/usr/bin/env python
 """
-把訂單總表依「欲配送日期」拆成一天一個分頁，並產出每日出貨統計
+Split the master order sheet by "欲配送日期" (desired delivery date) into one
+tab per day, and produce daily shipping statistics.
 
-同一個試算表檔案裡，每個配送日期會有一個以日期命名的分頁（例如 2026-08-16），
-沒填日期或日期看不懂的訂單會集中在「未指定日期」分頁。
+Within the same spreadsheet file, each delivery date gets a tab named after the
+date (e.g. 2026-08-16); orders with no date or an unreadable date are collected
+in the 「未指定日期」 (unspecified date) tab.
 
-每個分頁的訂單列下方會附上該日的備貨清單，形如：
+Below each tab's order rows, that day's packing list is appended, e.g.:
     20A 家庭號 1箱*2個地址
     20A 禮盒 1盒*2個地址
     18A 禮盒 1盒*1個地址
 
-用法：
-    # 只預覽會怎麼分，不動試算表（預設）
+Usage:
+    # Only preview how orders would be split; the spreadsheet is untouched (default)
     python organize_by_date.py
 
-    # 確認沒問題後才真的寫入
+    # Actually write once everything looks right
     python organize_by_date.py --write
 
-    # 指定來源分頁（預設「表單回覆 1」）
+    # Specify the source tab (default 「表單回覆 1」)
     python organize_by_date.py --write --source '表單回覆 1'
 
-注意：日期分頁每次執行都會整個重建，請不要手動編輯，要改請改總表。
+Note: date tabs are fully rebuilt on every run. Do not edit them by hand;
+make changes in the master sheet instead.
 """
 
 import argparse
@@ -30,22 +33,22 @@ import sys
 import config
 from src.services.sheet_date_organizer import SheetDateOrganizer, UNDATED_SHEET_NAME
 
-# Windows 主控台預設 cp950，直接印中文會炸掉
+# The Windows console defaults to cp950; printing Chinese directly would crash
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 
 def main():
-    parser = argparse.ArgumentParser(description='把訂單總表依配送日期分成不同分頁')
+    parser = argparse.ArgumentParser(description='Split the master order sheet into separate tabs by delivery date')
     parser.add_argument('--write', action='store_true',
-                        help='實際寫入試算表；未指定時只顯示預覽')
+                        help='Actually write to the spreadsheet; without this only a preview is shown')
     parser.add_argument('--source', default=None,
-                        help='來源分頁名稱（預設「表單回覆 1」）')
+                        help='Source tab name (default 「表單回覆 1」)')
     args = parser.parse_args()
 
     missing = _check_config()
     if missing:
-        print('❌ 設定不完整，缺少：' + '、'.join(missing))
+        print('❌ Incomplete configuration, missing: ' + ', '.join(missing))
         return 1
 
     organizer = SheetDateOrganizer(
@@ -54,7 +57,7 @@ def main():
         source_sheet=args.source,
     )
 
-    print(f'📄 來源分頁：{organizer.source_sheet}')
+    print(f'📄 Source tab: {organizer.source_sheet}')
     result = organizer.organize(dry_run=not args.write)
 
     if not result['success']:
@@ -63,33 +66,33 @@ def main():
 
     groups = result.get('groups') or {}
     if not groups:
-        print(result.get('message', '沒有可分類的訂單'))
+        print(result.get('message', 'No orders to sort'))
         return 0
 
     summaries = result.get('summaries') or {}
-    print(f'\n共 {result["total_rows"]} 筆訂單，分成 {len(groups)} 個分頁：')
+    print(f'\n{result["total_rows"]} orders in total, split into {len(groups)} tabs:')
     for sheet_name, rows in groups.items():
         mark = '⚠️ ' if sheet_name == UNDATED_SHEET_NAME else '  '
-        print(f'\n{mark}{sheet_name}　{len(rows)} 筆')
+        print(f'\n{mark}{sheet_name}　{len(rows)} orders')
         _print_summary(summaries.get(sheet_name))
 
     stale = result.get('stale_sheets') or []
     if stale:
-        print(f'\n🧹 這些日期分頁已無對應訂單（訂單可能改了配送日），內容會被清空：')
+        print(f'\n🧹 These date tabs no longer have matching orders (the delivery date may have changed); their contents will be cleared:')
         for sheet_name in stale:
             print(f'   {sheet_name}')
 
     if not args.write:
-        print('\n這是預覽，沒有寫入任何資料。確認無誤後加上 --write 就會建立／更新這些分頁。')
+        print('\nThis is a preview; nothing was written. Once it looks right, add --write to create/update these tabs.')
         return 0
 
-    print(f'\n✅ 已寫入 {len(result["written_sheets"])} 個分頁'
-          + (f'，清空 {len(stale)} 個' if stale else ''))
+    print(f'\n✅ Wrote {len(result["written_sheets"])} tabs'
+          + (f', cleared {len(stale)}' if stale else ''))
     return 0
 
 
 def _print_summary(summary):
-    """印出單一日期的出貨統計（備貨清單）"""
+    """Print the shipping statistics (packing list) for a single date."""
     if not summary:
         return
 
@@ -98,11 +101,11 @@ def _print_summary(summary):
 
     if summary['unparsed']:
         for raw in sorted(set(summary['unparsed'])):
-            print(f'      ⚠️ 品項無法辨識，未列入統計：{raw}')
+            print(f'      ⚠️ Unrecognized item, excluded from the statistics: {raw}')
 
     totals = '／'.join(f'{count} {unit}' for unit, count in summary['totals'].items())
     if totals:
-        print(f'      ── 合計 {totals}')
+        print(f'      ── Total {totals}')
 
 
 def _check_config():

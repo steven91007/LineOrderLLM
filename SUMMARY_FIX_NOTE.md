@@ -1,42 +1,42 @@
-# 訂單匯總功能修復說明
+# Order Summary (匯總) Fix Notes
 
-## 問題描述
+## Problem description
 
-收到錯誤訊息：`Invalid reply token`
+Received the error message: `Invalid reply token`
 
-發生在用戶輸入 `#匯總 8/24` 時。
+It happened when a user typed `#匯總 8/24`.
 
-## 問題原因
+## Root cause
 
-LINE Bot API 的 `reply_token` 只能使用一次。原本的實作中：
+The LINE Bot API `reply_token` can only be used once. In the original implementation:
 
-1. 第一次使用 `_reply_text()` 發送 "🔍 正在查詢..." 訊息
-2. 第二次嘗試使用同一個 `reply_token` 發送查詢結果
-3. 導致第二次發送失敗，出現 "Invalid reply token" 錯誤
+1. The first call used `_reply_text()` to send a "🔍 正在查詢..." ("Querying...") message
+2. The second call tried to send the query result with the same `reply_token`
+3. So the second send failed with an "Invalid reply token" error
 
-## 解決方案
+## Solution
 
-### 已實施的修復
+### Fixes applied
 
-1. **移除第一次回覆**：刪除了 "正在查詢..." 的訊息，避免重複使用 reply_token
+1. **Removed the first reply**: deleted the "正在查詢..." ("Querying...") message to avoid reusing the reply_token
 
-2. **合併狀態和結果**：將處理狀態資訊併入最終結果中一次發送
+2. **Merged status and result**: the processing-status info is folded into the final result and sent once
    ```python
    full_message = f"🔍 已完成 {target_date} 的查詢\n\n{formatted_report}"
    ```
 
-3. **簡化長訊息處理**：因為 reply_token 限制，移除了分段發送的邏輯
+3. **Simplified long-message handling**: because of the reply_token limit, the split-and-send logic was removed
 
-### 修改的檔案
+### Files changed
 
 - `src/handlers/order_handler.py`
-  - 第 906 行：移除了先發送處理中訊息的邏輯
-  - 第 943-951 行：修改為合併狀態和結果一次發送
-  - 第 997-1009 行：將 `_send_long_message` 改為備用方法
+  - Line 906: removed the logic that sent a "processing" message first
+  - Lines 943-951: changed to merge status and result into a single send
+  - Lines 997-1009: turned `_send_long_message` into a fallback method
 
-## 使用說明
+## Usage
 
-### 正常使用方式
+### Normal usage
 
 ```
 用戶: #匯總 8/24
@@ -46,57 +46,58 @@ LINE Bot API 的 `reply_token` 只能使用一次。原本的實作中：
 ==============================
 [詳細統計資料...]
 ```
+(用戶 = user, 系統 = system. The bot reply reads roughly "Finished the query for 8/24 / 2024-08-24 item summary report / [detailed statistics...]".)
 
-### 支援的指令格式
+### Supported command formats
 
-- `#匯總 8/24` - 查詢 8月24日
-- `#匯總 08-24` - 查詢 8月24日
-- `#匯總 2024-08-24` - 查詢 2024年8月24日
-- `#匯總 星期二` - 查詢本週星期二
-- `#匯總` - 查詢今天
+- `#匯總 8/24` - query August 24
+- `#匯總 08-24` - query August 24
+- `#匯總 2024-08-24` - query August 24, 2024
+- `#匯總 星期二` - query this week's Tuesday
+- `#匯總` - query today
 
-## 技術限制
+## Technical limitations
 
-### LINE Bot API 限制
+### LINE Bot API limits
 
 1. **Reply Token**
-   - 每個 reply_token 只能使用一次
-   - 必須在收到 webhook 後立即回覆
-   - 無法發送多個回覆訊息
+   - Each reply_token can only be used once
+   - You must reply immediately after receiving the webhook
+   - You cannot send multiple reply messages
 
-2. **訊息長度**
-   - 單一訊息最大 5000 字符
-   - 超過 2000 字符時建議精簡內容
+2. **Message length**
+   - A single message is at most 5000 characters
+   - Above 2000 characters, trimming the content is recommended
 
-### 建議的改進方案（未來）
+### Suggested improvements (future)
 
-如果需要更好的使用體驗，可以考慮：
+For a better user experience, consider:
 
-1. **使用 Push Message**
-   - 需要付費的 LINE Official Account
-   - 可以主動發送多則訊息
-   - 不受 reply_token 限制
+1. **Use Push Message**
+   - Requires a paid LINE Official Account
+   - Can proactively send multiple messages
+   - Not limited by reply_token
 
-2. **使用 Loading Animation**
-   - LINE 支援的 loading indicator
-   - 但仍受 reply_token 限制
+2. **Use Loading Animation**
+   - A loading indicator supported by LINE
+   - Still subject to the reply_token limit, though
 
-3. **優化查詢速度**
-   - 快取常用查詢結果
-   - 優化 Google Sheets API 調用
+3. **Speed up queries**
+   - Cache common query results
+   - Optimize Google Sheets API calls
 
-## 測試確認
+## Test confirmation
 
-✅ 功能已測試並確認正常運作：
+✅ The feature has been tested and confirmed working:
 
-1. 日期解析正常
-2. Google Sheets 查詢正常
-3. 品項統計正常
-4. 報告生成正常
-5. 單次回覆正常（無 Invalid reply token 錯誤）
+1. Date parsing works
+2. Google Sheets queries work
+3. Item statistics work
+4. Report generation works
+5. Single reply works (no Invalid reply token error)
 
-## 注意事項
+## Notes
 
-- 匯總功能需要 Google Sheets 整合正常運作
-- 確保環境變數 `GOOGLE_SHEET_ID` 和 `GOOGLE_CREDENTIALS_PATH` 已正確設定
-- 訂單必須已上傳到 Google Sheets 才能查詢到
+- The summary feature requires the Google Sheets integration to be working
+- Make sure the environment variables `GOOGLE_SHEET_ID` and `GOOGLE_CREDENTIALS_PATH` are set correctly
+- Orders must already be uploaded to Google Sheets to be found by the query

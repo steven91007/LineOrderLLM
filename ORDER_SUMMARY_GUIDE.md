@@ -1,33 +1,36 @@
-# 訂單匯總功能使用指南
+# Order Summary Guide
 
-## 🎯 功能概述
+## 🎯 Overview
 
-新增的訂單匯總功能可以讓您快速獲取特定日期的品項統計表，方便向主管報告當日的訂單情況。
+The order summary feature gives you a quick per-item tally for a given date, making it easy to report that day's orders to your manager.
 
-## 📱 使用方法
+## 📱 Usage
 
-### 基本語法
+### Basic syntax
+The command keyword is `#匯總` ("#summary") and must be typed as shown:
 ```
-#匯總 [日期]
+#匯總 [date]
 ```
 
-### 支援的日期格式
+### Supported date formats
 
-1. **月日格式**
-   - `#匯總 8/27` - 查詢8月27日
-   - `#匯總 08-27` - 查詢8月27日
+1. **Month/day**
+   - `#匯總 8/27` - August 27
+   - `#匯總 08-27` - August 27
 
-2. **完整日期格式**
-   - `#匯總 2024-08-27` - 查詢2024年8月27日
+2. **Full date**
+   - `#匯總 2024-08-27` - August 27, 2024
 
-3. **相對日期格式**
-   - `#匯總 星期二` - 查詢本週星期二
-   - `#匯總 週三` - 查詢本週週三
+3. **Relative date** (weekday names in Chinese)
+   - `#匯總 星期二` - Tuesday of this week
+   - `#匯總 週三` - Wednesday of this week
 
-4. **無日期**
-   - `#匯總` - 查詢今天的訂單
+4. **No date**
+   - `#匯總` - today's orders
 
-### 使用範例
+### Example
+
+The bot replies in Chinese. The reply below shows: a "querying 8/27 order data, please wait" notice, then the "item summary report" with total orders, total items, number of item types, the per-item breakdown, the top items, the report generation time, and a note that the report can be handed straight to a manager.
 
 ```
 用戶: #匯總 8/27
@@ -53,115 +56,115 @@
 🎯 此報告可直接提供給主管參考
 ```
 
-## 🔧 功能特色
+## 🔧 Features
 
-### 1. 智能品項解析
-支援多種商品格式：
+### 1. Smart item parsing
+Supports several item formats (`兩個` = "two", `一個` = "one"):
 - `18A禮盒 x2, 16A蛋糕 x1`
 - `18A禮盒 兩個, 16A蛋糕 一個`
 - `18A禮盒(2), 16A蛋糕(1)`
 - `2 x 18A禮盒, 1 x 16A蛋糕`
 
-### 2. 自動統計整合
-- 自動從 Google Sheets 查詢指定日期的訂單
-- 智能解析商品明細並統計數量
-- 按數量排序，顯示熱門品項
+### 2. Automatic tallying
+- Automatically queries Google Sheets for orders on the given date
+- Parses item details and tallies quantities
+- Sorts by quantity and shows the top items
 
-### 3. 多工作表支援
-- 優先搜尋對應日期的專用工作表
-- 如果沒有找到，會搜尋所有工作表
-- 支援按日期自動分組的工作表結構
+### 3. Multiple sheet support
+- Searches the dedicated sheet for that date first
+- If none is found, searches all sheets
+- Supports the sheet structure that is automatically grouped by date
 
-### 4. 完整報告格式
-生成的報告包含：
-- 總訂單數和總品項數
-- 詳細的品項明細清單
-- 熱門品項統計
-- 適合直接提供給主管的格式
+### 4. Complete report format
+The generated report includes:
+- Total orders and total items
+- A detailed per-item list
+- Top-item statistics
+- A format suitable for handing straight to a manager
 
-## ⚙️ 系統需求
+## ⚙️ Requirements
 
-### 必要條件
-1. ✅ Google Sheets 整合已啟用
-2. ✅ 訂單資料已上傳到 Google Sheets
-3. ✅ 用戶具有系統使用權限
+### Prerequisites
+1. ✅ Google Sheets integration is enabled
+2. ✅ Order data has been uploaded to Google Sheets
+3. ✅ The user is authorized to use the system
 
-### 資料來源
-- 匯總功能從 Google Sheets 中讀取訂單資料
-- 支援按日期自動分組的工作表結構
-- 相容現有的訂單上傳格式
+### Data source
+- The summary feature reads order data from Google Sheets
+- Supports the sheet structure that is automatically grouped by date
+- Compatible with the existing order upload format
 
-## 🚨 注意事項
+## 🚨 Notes
 
-### 日期格式
-- 日期解析基於現有的星期幾轉換邏輯
-- 支援絕對日期（如 8/27）和相對日期（如星期二）
-- 建議使用標準格式以確保正確解析
+### Date formats
+- Date parsing is based on the existing weekday conversion logic
+- Supports absolute dates (e.g. 8/27) and relative dates (e.g. 星期二, "Tuesday")
+- Using a standard format is recommended to make sure dates parse correctly
 
-### 商品解析
-- 系統會嘗試多種解析模式來識別商品和數量
-- 如果解析失敗，會使用備用解析邏輯
-- 商品名稱會自動標準化以避免重複計算
+### Item parsing
+- The system tries several parsing patterns to identify items and quantities
+- If parsing fails, it falls back to backup parsing logic
+- Item names are normalized automatically to avoid double counting
 
-### 錯誤處理
-- 如果找不到訂單資料，會顯示友好的錯誤訊息
-- 系統會提示可能的原因和解決方案
-- 支援長訊息自動分段發送
+### Error handling
+- If no order data is found, a friendly error message is shown
+- The system suggests possible causes and solutions
+- Long messages are split and sent in parts automatically
 
-## 📊 實際應用場景
+## 📊 Real-World Scenarios
 
-### 1. 每日營運報告
+### 1. Daily operations report
 ```
-主管: 今天的訂單情況如何？
-你: #匯總
-系統: [顯示今日完整統計]
-```
-
-### 2. 特定日期查詢
-```
-主管: 上週二賣了多少個禮盒？
-你: #匯總 星期二
-系統: [顯示上週二的詳細統計]
+Manager: How are today's orders looking?
+You: #匯總
+Bot: [shows today's full summary]
 ```
 
-### 3. 歷史資料分析
+### 2. Specific date lookup
 ```
-需求: 查看8月27日的銷售情況
-你: #匯總 8/27
-系統: [顯示該日期的完整報告]
+Manager: How many gift boxes did we sell last Tuesday?
+You: #匯總 星期二
+Bot: [shows detailed stats for last Tuesday]
 ```
 
-## 🔄 與現有功能的整合
+### 3. Historical analysis
+```
+Need: check sales for August 27
+You: #匯總 8/27
+Bot: [shows the full report for that date]
+```
 
-### 不影響現有功能
-- ✅ 訂單建立流程不受影響
-- ✅ Google Sheets 上傳功能正常
-- ✅ LIFF 編輯器功能正常
-- ✅ 所有現有指令繼續可用
+## 🔄 Integration with Existing Features
 
-### 相容性保證
-- 匯總功能作為獨立模組實作
-- 使用現有的 Google Sheets 客戶端
-- 遵循現有的日期處理邏輯
-- 不修改任何現有的資料結構
+### Existing features are unaffected
+- ✅ The order creation flow is unaffected
+- ✅ Google Sheets uploads work as before
+- ✅ The LIFF editor works as before
+- ✅ All existing commands remain available
 
-## 🎯 使用建議
+### Compatibility guarantees
+- The summary feature is implemented as a standalone module
+- It uses the existing Google Sheets client
+- It follows the existing date handling logic
+- It does not modify any existing data structures
 
-1. **定期使用**: 建議每日使用匯總功能檢查當日訂單情況
-2. **格式統一**: 建議使用標準日期格式（如 8/27）以確保正確解析
-3. **資料確認**: 使用前確保相關訂單已上傳到 Google Sheets
-4. **報告保存**: 生成的報告可以直接截圖或複製給主管
+## 🎯 Recommendations
 
-## ❓ 常見問題
+1. **Use it regularly**: check the day's orders with the summary feature every day
+2. **Consistent formats**: use a standard date format (e.g. 8/27) to make sure it parses correctly
+3. **Check the data**: make sure the relevant orders have been uploaded to Google Sheets before using it
+4. **Keep the report**: you can screenshot or copy the generated report straight to your manager
 
-**Q: 為什麼查詢不到某個日期的訂單？**
-A: 請確認該日期的訂單已經上傳到 Google Sheets，且日期格式正確。
+## ❓ FAQ
 
-**Q: 品項統計不準確怎麼辦？**
-A: 檢查原始訂單中的商品格式是否標準，系統支援多種格式但建議使用 "商品名 x數量" 的格式。
+**Q: Why can't I find orders for a certain date?**
+A: Make sure that date's orders have been uploaded to Google Sheets and the date format is correct.
 
-**Q: 可以查詢多個日期的匯總嗎？**
-A: 目前每次只能查詢一個日期，如需多日期統計請分別查詢。
+**Q: What if the item tally is inaccurate?**
+A: Check whether the item format in the original orders is standard. The system supports several formats, but the "item name x quantity" format is recommended.
 
-**Q: 報告太長無法完整顯示怎麼辦？**
-A: 系統會自動分段發送長訊息，您會收到多則訊息包含完整報告。
+**Q: Can I get a summary for multiple dates?**
+A: Currently you can only query one date at a time; for multi-date stats, query each date separately.
+
+**Q: What if the report is too long to display in full?**
+A: The system automatically splits long messages, so you will receive several messages containing the full report.

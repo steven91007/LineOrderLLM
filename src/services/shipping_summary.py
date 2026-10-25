@@ -1,42 +1,45 @@
 """
-出貨統計：把一天的訂單彙整成備貨清單
+Shipping statistics: aggregate one day's orders into a packing list.
 
-輸出形如：
+Output looks like:
 
     20A 家庭號 1箱*2個地址
     20A 禮盒 1盒*2個地址
     18A 禮盒 1盒*1個地址
 
-「個地址」數的是**訂單列數**，不是不重複地址數——一列就是一次出貨，
-同一個地址下兩張單要包兩份，合併計算會少備貨。
+「個地址」 ("addresses") counts **order rows**, not distinct addresses -- each row
+is one shipment, and two orders to the same address need two packages, so
+merging them would under-stock.
 
-統計的來源是試算表 I／J 欄的下拉選項字串（例如 `20A 一盒 $1,150`、
-`18A 1箱 $1,850`），而不是自由文字，所以可以穩定地用規則解析。
-禮盒的數量用中文（一盒、兩盒），家庭號用阿拉伯數字（1箱、2箱），
-兩者不一致是表單本身的寫法，這裡讀進來之後統一轉成阿拉伯數字顯示。
+The source is the dropdown option strings in sheet columns I/J (e.g.
+`20A 一盒 $1,150`, `18A 1箱 $1,850`) rather than free text, so they can be parsed
+reliably with rules. Gift box (禮盒) quantities are written in Chinese numerals
+(一盒, 兩盒) while family packs (家庭號) use Arabic numerals (1箱, 2箱); the
+inconsistency comes from the form itself, and both are converted to Arabic
+numerals for display here.
 """
 
 import re
 from collections import OrderedDict
 from typing import Any, Dict, List, NamedTuple
 
-# 品項欄位在總表的位置
-GIFTBOX_INDEX = 8   # I 欄 (禮盒) 欲訂購的品項
-FAMILY_INDEX = 9    # J 欄 (家庭號) 欲訂購的品項
+# Positions of the item columns in the master sheet
+GIFTBOX_INDEX = 8   # Column I: (禮盒) 欲訂購的品項 (gift box items)
+FAMILY_INDEX = 9    # Column J: (家庭號) 欲訂購的品項 (family pack items)
 
 GIFTBOX_LABEL = '禮盒'
 FAMILY_LABEL = '家庭號'
 
-# 選項字串開頭的「規格 + 數量 + 單位」，例如 `20A 一盒 $1,150`、`18A 1箱 $1,850`
+# The "spec + quantity + unit" at the start of an option string, e.g. `20A 一盒 $1,150`, `18A 1箱 $1,850`
 _OPTION_PATTERN = re.compile(r'^\s*(\d+\s*[A-Za-z])\s*([一二兩三四五六七八九十\d]+)\s*([盒箱])')
 
-# 「雙雙對對」不分規格，固定寫入家庭號欄位，格式如 `雙雙對對 一組 $3,400`
+# 「雙雙對對」 has no spec and is always written to the family pack (家庭號) column, formatted like `雙雙對對 一組 $3,400`
 SHUANGSHUANG_LABEL = '雙雙對對'
 _SHUANGSHUANG_PATTERN = re.compile(
     rf'^\s*{SHUANGSHUANG_LABEL}\s*([一二兩三四五六七八九十\d]+)\s*組'
 )
 
-# 表單選項還沒上架前，小編習慣直接手打「雙雙對對*數量」，也一併認得
+# Before the form option went live, staff typed 「雙雙對對*數量」 (item*quantity) by hand; recognize that too
 _SHUANGSHUANG_SHORTHAND_PATTERN = re.compile(
     rf'^\s*{SHUANGSHUANG_LABEL}\s*\*\s*(\d+)\s*$'
 )
@@ -48,30 +51,30 @@ _CHINESE_TO_INT = {
 
 
 class SummaryLine(NamedTuple):
-    """一種「規格＋類別＋單筆數量」的統計結果"""
-    category: str      # 禮盒 / 家庭號
+    """Statistics for one (spec + category + per-order quantity) combination."""
+    category: str      # 禮盒 (gift box) / 家庭號 (family pack)
     spec: str          # 18A / 20A
-    quantity: int      # 每一筆訂單的盒數或箱數
-    unit: str          # 盒 / 箱
-    addresses: int     # 有幾筆訂單（幾個出貨地址）
-    total_units: int   # quantity * addresses，總共要備幾盒／幾箱
+    quantity: int      # Boxes (盒) or cases (箱) per order
+    unit: str          # 盒 / 箱 (unit)
+    addresses: int     # Number of orders (number of shipping addresses)
+    total_units: int   # quantity * addresses: total boxes/cases to prepare
 
     @property
     def text(self) -> str:
-        """`20A 家庭號 1箱*2個地址`（無規格的品項如雙雙對對，省略規格）"""
+        """`20A 家庭號 1箱*2個地址` (the spec is omitted for spec-less items such as 雙雙對對)."""
         prefix = f'{self.spec} {self.category}' if self.spec else self.category
         return f'{prefix} {self.quantity}{self.unit}*{self.addresses}個地址'
 
 
 def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
-    """統計一批訂單列
+    """Compute statistics for a batch of order rows.
 
     Args:
-        rows: 訂單資料列（不含標題列），欄位順序同總表
+        rows: Order data rows (excluding the header), in master-sheet column order
 
     Returns:
         {'lines': [SummaryLine, ...], 'order_count': int,
-         'totals': {'盒': n, '箱': n}, 'unparsed': [原始字串, ...]}
+         'totals': {'盒': n, '箱': n}, 'unparsed': [raw string, ...]}
     """
     counts: Dict[tuple, int] = OrderedDict()
     unparsed: List[str] = []
@@ -90,7 +93,7 @@ def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
 
             parsed = _parse_option(raw)
             if not parsed:
-                # 解析不出來就記下來回報，不要靜默漏掉——漏算比算錯更難發現
+                # Record unparseable values for reporting rather than silently dropping them -- a missed count is harder to notice than a wrong one
                 unparsed.append(raw)
                 continue
 
@@ -104,7 +107,7 @@ def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
                     addresses=addresses, total_units=quantity * addresses)
         for (category, spec, quantity, unit), addresses in counts.items()
     ]
-    # 排序：禮盒在前（和試算表的欄位順序一致），再依規格、單筆數量
+    # Sort: gift boxes first (matching the sheet column order), then by spec and per-order quantity
     lines.sort(key=lambda line: (line.category != GIFTBOX_LABEL, line.spec, line.quantity))
 
     totals: Dict[str, int] = OrderedDict()
@@ -120,7 +123,7 @@ def summarize(rows: List[List[Any]]) -> Dict[str, Any]:
 
 
 def summary_rows(summary: Dict[str, Any], title: str) -> List[List[Any]]:
-    """把統計結果轉成要寫進試算表的資料列（單欄文字，接在訂單列下方）"""
+    """Turn the statistics into rows to write to the sheet (single-column text, placed below the order rows)."""
     rows: List[List[Any]] = [[], [f'📦 {title} 出貨統計']]
     rows.extend([line.text] for line in summary['lines'])
 
@@ -133,14 +136,14 @@ def summary_rows(summary: Dict[str, Any], title: str) -> List[List[Any]]:
 
 
 def _totals_text(summary: Dict[str, Any]) -> str:
-    """`合計 4 筆訂單／禮盒 3 盒／家庭號 2 箱` 這種收尾行"""
+    """The closing line, like `合計 4 筆訂單／禮盒 3 盒／家庭號 2 箱`."""
     parts = [f'合計 {summary["order_count"]} 筆訂單']
     parts.extend(f'{count} {unit}' for unit, count in summary['totals'].items())
     return '／'.join(parts)
 
 
 def _parse_option(option: str):
-    """把選項字串拆成 (類別覆寫或 None, 規格, 數量, 單位)，看不懂回 None"""
+    """Split an option string into (category override or None, spec, quantity, unit); return None if unreadable."""
     shuangshuang_match = _SHUANGSHUANG_PATTERN.match(option)
     if shuangshuang_match:
         quantity = _to_int(shuangshuang_match.group(1))
@@ -165,13 +168,13 @@ def _parse_option(option: str):
 
 
 def _to_int(text: str):
-    """數量字串轉整數，中文與阿拉伯數字都吃"""
+    """Convert a quantity string to an int; accepts both Chinese and Arabic numerals."""
     text = text.strip()
     if text.isdigit():
         return int(text)
     if text in _CHINESE_TO_INT:
         return _CHINESE_TO_INT[text]
-    # 十一、十二…（表單目前沒有，但寫法便宜就先擋著）
+    # 十一, 十二, ... (11, 12; the form doesn't use these yet, but handling them is cheap)
     if text.startswith('十') and len(text) == 2 and text[1] in _CHINESE_TO_INT:
         return 10 + _CHINESE_TO_INT[text[1]]
     return None

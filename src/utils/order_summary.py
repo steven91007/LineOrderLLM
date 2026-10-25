@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-訂單匯總工具 - 處理品項統計和匯總報告
+Order summary tool - item statistics and summary reports
+
+Note: the formatted report text is staff-facing output and stays Chinese.
 """
 import re
 from typing import Dict, List, Any, Tuple
@@ -11,21 +13,21 @@ logger = logging.getLogger(__name__)
 
 
 class OrderSummaryGenerator:
-    """訂單匯總生成器"""
+    """Order summary generator"""
     
     def __init__(self):
         self.item_patterns = [
-            # 標準格式: 18A禮盒 x2, 16A蛋糕 x1
+            # Standard format: 18A禮盒 x2, 16A蛋糕 x1
             r'([^,\n]+?)\s*x\s*(\d+)',
-            # 中文格式: 18A禮盒 兩個, 16A蛋糕 一個
+            # Chinese numeral format: 18A禮盒 兩個, 16A蛋糕 一個
             r'([^,\n]+?)\s*([一二三四五六七八九十\d]+)\s*個',
-            # 括號格式: 18A禮盒(2), 16A蛋糕(1)
+            # Parenthesized format: 18A禮盒(2), 16A蛋糕(1)
             r'([^,\n]+?)\s*\(\s*(\d+)\s*\)',
-            # 數量在前: 2 x 18A禮盒, 1 x 16A蛋糕
+            # Quantity first: 2 x 18A禮盒, 1 x 16A蛋糕
             r'(\d+)\s*x\s*([^,\n]+)',
         ]
         
-        # 中文數字轉換對照表
+        # Chinese numeral -> int lookup table
         self.chinese_numbers = {
             '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
             '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
@@ -33,20 +35,20 @@ class OrderSummaryGenerator:
         }
     
     def generate_summary_report(self, orders: List[Dict[str, Any]], target_date: str) -> Dict[str, Any]:
-        """生成完整的匯總報告
+        """Generate the full summary report
         
         Args:
-            orders: 訂單列表
-            target_date: 目標日期
+            orders: List of orders
+            target_date: Target date
             
         Returns:
             Dict containing summary report data
         """
         try:
-            # 解析所有品項
+            # Parse all items
             item_summary = self._parse_and_summarize_items(orders)
             
-            # 生成報告
+            # Build the report
             report = {
                 'success': True,
                 'target_date': target_date,
@@ -63,6 +65,7 @@ class OrderSummaryGenerator:
             logger.error(f"Error generating summary report: {e}")
             return {
                 'success': False,
+                # Kept in Chinese: may be shown to staff
                 'error': f'生成匯總報告時發生錯誤: {e}',
                 'target_date': target_date,
                 'total_orders': 0,
@@ -72,10 +75,10 @@ class OrderSummaryGenerator:
             }
     
     def _parse_and_summarize_items(self, orders: List[Dict[str, Any]]) -> Dict[str, int]:
-        """解析並統計所有品項
+        """Parse and tally all items
         
         Args:
-            orders: 訂單列表
+            orders: List of orders
             
         Returns:
             Dict mapping item names to total quantities
@@ -87,35 +90,35 @@ class OrderSummaryGenerator:
             if not items_text:
                 continue
             
-            # 解析該訂單的品項
+            # Parse this order's items
             items = self._parse_items_from_text(items_text)
             
-            # 累加到總計
+            # Add to the running totals
             for item_name, quantity in items:
-                # 標準化品項名稱（去除多餘空格）
+                # Normalize the item name (collapse extra whitespace)
                 normalized_name = self._normalize_item_name(item_name)
                 item_counts[normalized_name] += quantity
         
-        # 轉換為普通字典並排序
+        # Convert to a plain dict, sorted
         return dict(sorted(item_counts.items()))
     
     def _parse_items_from_text(self, items_text: str) -> List[Tuple[str, int]]:
-        """從商品文字中解析品項和數量
+        """Parse item names and quantities from the item text
         
         Args:
-            items_text: 商品明細文字
+            items_text: Item detail text
             
         Returns:
             List of (item_name, quantity) tuples
         """
         items = []
         
-        # 清理文字
+        # Clean up the text
         cleaned_text = items_text.strip()
         if not cleaned_text:
             return items
         
-        # 嘗試不同的解析模式
+        # Try each parsing pattern
         for pattern in self.item_patterns:
             matches = re.findall(pattern, cleaned_text, re.IGNORECASE)
             
@@ -124,64 +127,64 @@ class OrderSummaryGenerator:
                     if len(match) == 2:
                         item_name, quantity_str = match
                         
-                        # 處理數量
+                        # Handle the quantity
                         quantity = self._parse_quantity(quantity_str)
                         if quantity > 0:
-                            # 清理品項名稱
+                            # Clean the item name
                             clean_name = self._clean_item_name(item_name)
                             if clean_name:
                                 items.append((clean_name, quantity))
                 
-                # 如果找到匹配，就不再嘗試其他模式
+                # Once a pattern matches, don't try the others
                 if items:
                     break
         
-        # 如果所有模式都無法解析，嘗試簡單分割
+        # If no pattern could parse it, fall back to simple splitting
         if not items:
             items = self._fallback_parse(cleaned_text)
         
         return items
     
     def _parse_quantity(self, quantity_str: str) -> int:
-        """解析數量字串
+        """Parse a quantity string
         
         Args:
-            quantity_str: 數量字串（可能是數字或中文）
+            quantity_str: Quantity string (digits or Chinese numerals)
             
         Returns:
-            int: 解析後的數量
+            int: Parsed quantity
         """
         quantity_str = quantity_str.strip()
         
-        # 嘗試直接轉換為數字
+        # Try converting directly to an int
         if quantity_str.isdigit():
             return int(quantity_str)
         
-        # 嘗試中文數字轉換
+        # Try Chinese numeral conversion
         if quantity_str in self.chinese_numbers:
             return self.chinese_numbers[quantity_str]
         
-        # 處理包含中文數字的字串（如"兩個"中的"兩"）
+        # Handle strings containing a Chinese numeral (e.g. "兩" in "兩個")
         for chinese, num in self.chinese_numbers.items():
             if chinese in quantity_str:
                 return num
         
-        # 預設為1
+        # Default to 1
         return 1
     
     def _clean_item_name(self, item_name: str) -> str:
-        """清理品項名稱
+        """Clean an item name
         
         Args:
-            item_name: 原始品項名稱
+            item_name: Raw item name
             
         Returns:
-            str: 清理後的品項名稱
+            str: Cleaned item name
         """
-        # 移除前後空格
+        # Strip leading/trailing whitespace
         cleaned = item_name.strip()
         
-        # 移除常見的前綴（如"商品："）
+        # Remove common prefixes (e.g. "商品：")
         prefixes_to_remove = ['商品:', '商品：', '產品:', '產品：', '•', '-', '*']
         for prefix in prefixes_to_remove:
             if cleaned.startswith(prefix):
@@ -190,34 +193,34 @@ class OrderSummaryGenerator:
         return cleaned
     
     def _normalize_item_name(self, item_name: str) -> str:
-        """標準化品項名稱（用於統計時去重）
+        """Normalize an item name (for de-duplication when tallying)
         
         Args:
-            item_name: 品項名稱
+            item_name: Item name
             
         Returns:
-            str: 標準化後的品項名稱
+            str: Normalized item name
         """
-        # 轉換為統一的大小寫和格式
+        # Convert to a consistent case and format
         normalized = item_name.strip()
         
-        # 移除多餘的空格
+        # Collapse extra whitespace
         normalized = re.sub(r'\s+', ' ', normalized)
         
         return normalized
     
     def _fallback_parse(self, items_text: str) -> List[Tuple[str, int]]:
-        """備用解析方法（當主要模式都失敗時使用）
+        """Fallback parser (used when all main patterns fail)
         
         Args:
-            items_text: 商品明細文字
+            items_text: Item detail text
             
         Returns:
             List of (item_name, quantity) tuples
         """
         items = []
         
-        # 按逗號或換行分割
+        # Split on commas or newlines
         parts = re.split(r'[,\n]', items_text)
         
         for part in parts:
@@ -225,19 +228,19 @@ class OrderSummaryGenerator:
             if not part:
                 continue
             
-            # 嘗試找出數字
+            # Try to find numbers
             numbers = re.findall(r'\d+', part)
             if numbers:
-                # 假設最後一個數字是數量
+                # Assume the last number is the quantity
                 quantity = int(numbers[-1])
-                # 移除數字後的部分作為品項名稱
+                # Use the text with numbers removed as the item name
                 item_name = re.sub(r'\d+', '', part).strip()
                 item_name = self._clean_item_name(item_name)
                 
                 if item_name:
                     items.append((item_name, quantity))
             else:
-                # 沒有數字，假設數量為1
+                # No number: assume quantity 1
                 item_name = self._clean_item_name(part)
                 if item_name:
                     items.append((item_name, 1))
@@ -245,23 +248,23 @@ class OrderSummaryGenerator:
         return items
     
     def _format_summary_report(self, item_summary: Dict[str, int], target_date: str, total_orders: int) -> str:
-        """格式化匯總報告
+        """Format the summary report
         
         Args:
-            item_summary: 品項統計字典
-            target_date: 目標日期
-            total_orders: 總訂單數
+            item_summary: Item tally dict
+            target_date: Target date
+            total_orders: Total number of orders
             
         Returns:
-            str: 格式化的報告文字
+            str: Formatted report text
         """
         if not item_summary:
             return f"📊 {target_date} 品項匯總報告\n\n❌ 該日期沒有找到任何訂單資料。"
         
-        # 計算總品項數量
+        # Compute the total item count
         total_items = sum(item_summary.values())
         
-        # 構建報告
+        # Build the report
         report_lines = [
             f"📊 {target_date} 品項匯總報告",
             "=" * 30,
@@ -272,13 +275,13 @@ class OrderSummaryGenerator:
             "📈 品項明細："
         ]
         
-        # 按數量排序（從大到小）
+        # Sort by quantity (descending)
         sorted_items = sorted(item_summary.items(), key=lambda x: x[1], reverse=True)
         
         for i, (item_name, quantity) in enumerate(sorted_items, 1):
             report_lines.append(f"  {i:2d}. {item_name} × {quantity}")
         
-        # 添加統計摘要
+        # Append the stats summary
         if len(sorted_items) > 0:
             report_lines.extend([
                 "",

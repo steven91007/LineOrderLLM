@@ -1,12 +1,12 @@
-"""匯入確認與日期分頁整理的按鈕介面
+"""Button UIs for import confirmation and date sheet organizing
 
-兩個 View 的骨架一樣：
-    連點防護 → 停用按鈕並 ack → 丟給工作執行緒 → 用 channel.send 送結果
+Both Views share the same skeleton:
+    double-click guard -> disable buttons and ack -> hand off to worker thread -> send result via channel.send
 
-「用 channel.send 送結果」不是風格問題：interaction token 只有 15 分鐘，
-而 /organize 寫入在 20 個以上日期分頁時要 60+ 次 Sheets 呼叫，遇到配額退避
-就可能超過。用 followup.send 會直接 404，操作者永遠不會知道那個破壞性的
-重寫到底做完沒有。channel.send 是普通的 REST 呼叫，不會過期。
+"Send the result via channel.send" isn't a style choice: the interaction token only lasts 15 minutes,
+and an /organize write over 20+ date sheets takes 60+ Sheets calls, which can exceed that when quota
+backoff kicks in. followup.send would just 404, and the operator would never know whether the destructive
+rewrite actually finished. channel.send is a plain REST call and doesn't expire.
 """
 
 import logging
@@ -16,26 +16,26 @@ import discord
 
 from . import discord_format as fmt
 
-if TYPE_CHECKING:  # 只為了型別標註，避免和 handler 互相 import
+if TYPE_CHECKING:  # Only for type hints, to avoid a circular import with handler
     from .discord_handler import DiscordOrderHandler, PendingImport
 
 logger = logging.getLogger(__name__)
 
 
 class _ConfirmView(discord.ui.View):
-    """兩個確認介面共用的部分"""
+    """Parts shared by both confirmation views"""
 
     def __init__(self, handler: 'DiscordOrderHandler', *, timeout: float):
         super().__init__(timeout=timeout)
         self.handler = handler
         self.message: Optional[discord.Message] = None
-        # 連點防護。檢查和設定之間沒有 await，單執行緒的 event loop 下
-        # 這就是一個貨真價實的 mutex。
+        # Double-click guard. There's no await between the check and the set, so on the
+        # single-threaded event loop this is a genuine mutex.
         self._consumed = False
 
     def _add_button(self, label: str, style: discord.ButtonStyle, callback,
                     disabled: bool = False) -> None:
-        """按鈕標籤要帶執行時算出來的數字，所以不能用 @discord.ui.button decorator"""
+        """Button labels include numbers computed at runtime, so the @discord.ui.button decorator can't be used"""
         button = discord.ui.Button(label=label, style=style, disabled=disabled)
         button.callback = callback
         self.add_item(button)
@@ -52,14 +52,14 @@ class _ConfirmView(discord.ui.View):
         try:
             await self.message.edit(content='（已逾時，請重新操作一次）', view=self)
         except discord.HTTPException:
-            # 訊息可能已經被刪掉了，逾時清理本來就是 best-effort
-            logger.debug('逾時後更新訊息失敗，略過', exc_info=True)
+            # The message may already be deleted; timeout cleanup is best-effort anyway
+            logger.debug('Failed to update message after timeout, skipping', exc_info=True)
 
     def _cleanup(self) -> None:
-        """子類別覆寫：把自己從 handler 的暫存狀態裡移除"""
+        """Overridden by subclasses: remove self from the handler's pending state"""
 
     def _claim(self) -> bool:
-        """搶下這次點擊；已經被按過就回 False"""
+        """Claim this click; returns False if it was already pressed"""
         if self._consumed:
             return False
         self._consumed = True
@@ -67,7 +67,7 @@ class _ConfirmView(discord.ui.View):
 
 
 class ImportConfirmView(_ConfirmView):
-    """匯入預覽下方的「寫入可寫入的 / 含需確認 / 取消」"""
+    """The "寫入可寫入的 / 含需確認 / 取消" (write ready / include review / cancel) buttons under the import preview"""
 
     def __init__(self, handler: 'DiscordOrderHandler', pending: 'PendingImport',
                  *, timeout: float):
@@ -83,9 +83,9 @@ class ImportConfirmView(_ConfirmView):
             self._confirm_ready,
             disabled=(ready == 0),
         )
-        # 數字是 ready + review，不是 review：write(include_review=True) 的
-        # allowed 是 {'ready', 'review'}（chat_log_importer.py:364），兩種都會寫。
-        # 只標 review 的話，按鈕上的數字每次都會和 appended_rows 對不上。
+        # The number is ready + review, not review: allowed for write(include_review=True)
+        # is {'ready', 'review'} (chat_log_importer.py:364), so both get written.
+        # Showing only review would make the button count never match appended_rows.
         self._add_button(
             f'含需確認 ({ready + review})',
             discord.ButtonStyle.primary,
@@ -118,19 +118,19 @@ class ImportConfirmView(_ConfirmView):
             return
 
         self._disable_all()
-        # 一次往返同時做完 3 秒 ack 和停用按鈕
+        # One round trip handles both the 3-second ack and disabling the buttons
         await interaction.response.edit_message(content='⏳ 寫入中…', view=self)
         self.stop()
         self._cleanup()
 
-        # 在 await 工作執行緒之前先抓好 channel
+        # Grab the channel before awaiting the worker thread
         channel = interaction.channel
         pending = self.pending
 
         try:
             result = await self.handler.write_orders(pending.orders, include_review)
         except Exception as error:
-            logger.exception('寫入試算表失敗')
+            logger.exception('Failed to write to spreadsheet')
             await channel.send(f'❌ 寫入失敗：{fmt.truncate(str(error), 500)}')
             return
 
@@ -148,7 +148,7 @@ class ImportConfirmView(_ConfirmView):
 
 
 class OrganizeConfirmView(_ConfirmView):
-    """/organize 預覽下方的「確認寫入 / 取消」"""
+    """The "確認寫入 / 取消" (confirm write / cancel) buttons under the /organize preview"""
 
     def __init__(self, handler: 'DiscordOrderHandler', user_id: int,
                  source_sheet: Optional[str], *, timeout: float):
@@ -156,7 +156,7 @@ class OrganizeConfirmView(_ConfirmView):
         self.user_id = user_id
         self.source_sheet = source_sheet
 
-        # danger 樣式：這個動作會先清空日期分頁再重寫，不是單純的附加
+        # danger style: this action clears date sheets and rewrites them, not a simple append
         self._add_button('確認寫入', discord.ButtonStyle.danger, self._confirm)
         self._add_button('取消', discord.ButtonStyle.secondary, self._cancel)
 
@@ -183,7 +183,7 @@ class OrganizeConfirmView(_ConfirmView):
         try:
             result = await self.handler.organize(dry_run=False, source_sheet=self.source_sheet)
         except Exception as error:
-            logger.exception('日期分頁整理失敗')
+            logger.exception('Date sheet organizing failed')
             await channel.send(f'❌ 日期分頁整理失敗：{fmt.truncate(str(error), 500)}')
             return
 

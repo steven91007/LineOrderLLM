@@ -1,115 +1,119 @@
-# LINE Bot 智能訂單處理系統設置指南 v2.0
+# LINE Bot Smart Order Processing System Setup Guide v2.0
 
-## 功能概述
+## Overview
 
-這是一個智能 LINE Bot 訂單處理系統，具備以下功能：
+This is a smart LINE Bot order processing system with the following features:
 
-1. **訊息接收與權限控制**：私人訂單處理功能，僅授權用戶可使用
-2. **智能解析**：使用 OpenAI GPT-4 自動提取 單一/多份 訂單資訊
-3. **彈性資料結構**：寄件人資訊為選填，支援多份訂單處理
-4. **逐一確認流程**：多訂單可逐一確認或批量確認
-5. **資料整合**：自動將訂單資料寫入 Google Sheets
+1. **Message intake and access control**: private order processing, available only to authorized users
+2. **Smart parsing**: uses OpenAI GPT-4 to automatically extract single or multiple orders
+3. **Flexible data structure**: sender information is optional, and multiple orders are supported
+4. **One-by-one confirmation flow**: multiple orders can be confirmed one at a time or all at once
+5. **Data integration**: order data is written to Google Sheets automatically
 
-## ✨ 新功能亮點
+## ✨ What's New
 
-### 🔹 寄件人資訊選填
-- 寄件人姓名和電話改為選填欄位
-- 未提供時系統顯示「未提供」
+### 🔹 Optional sender information
+- Sender name and phone are now optional fields
+- When not provided, the system shows 「未提供」 ("not provided")
 
-### 🔹 多訂單支援
-- 單次最多處理 5 份訂單
-- 自動識別單一或多份訂單
-- 支援逐一確認或批量確認
+### 🔹 Multiple order support
+- Handles up to 5 orders at a time
+- Automatically detects single vs. multiple orders
+- Supports one-by-one or bulk confirmation
 
-### 🔹 智能錯誤處理
-- 多訂單解析失敗時建議單筆輸入
-- 提供清楚的錯誤提示和解決方案
+### 🔹 Smart error handling
+- Suggests entering orders one at a time when multi-order parsing fails
+- Provides clear error messages and solutions
 
-## 設置步驟
+## Setup Steps
 
-### 1. 環境準備
+### 1. Prepare the environment
 
 ```bash
-# 安裝相依套件
+# Install dependencies
 uv sync
 
-# 複製環境變數範本
+# Copy the environment variable template
 cp .env.example .env
 ```
 
-### 2. LINE Bot 設定
+### 2. LINE Bot setup
 
-1. 前往 [LINE Developers Console](https://developers.line.biz/)
-2. 建立新的 Provider 和 Channel
-3. 取得以下資訊並填入 `.env`：
+1. Go to the [LINE Developers Console](https://developers.line.biz/)
+2. Create a new Provider and Channel
+3. Get the following values and put them in `.env`:
    - `LINE_CHANNEL_ACCESS_TOKEN`
    - `LINE_CHANNEL_SECRET`
 
-### 3. OpenAI 設定
+### 3. OpenAI setup
 
-1. 前往 [OpenAI Platform](https://platform.openai.com/)
-2. 建立 API Key
-3. 將 API Key 填入 `.env` 的 `OPENAI_API_KEY`
+1. Go to the [OpenAI Platform](https://platform.openai.com/)
+2. Create an API key
+3. Put the API key in `OPENAI_API_KEY` in `.env`
 
-### 4. Google Sheets 設定
+### 4. Google Sheets setup
 
-1. 前往 [Google Cloud Console](https://console.cloud.google.com/)
-2. 建立新專案或選擇現有專案
-3. 啟用 Google Sheets API
-4. 建立服務帳戶並下載 JSON 憑證檔案
-5. 將憑證檔案重新命名為 `credentials.json` 並放在專案根目錄
-6. 建立 Google Sheet 並取得 Sheet ID
-7. 將 Sheet ID 填入 `.env` 的 `GOOGLE_SHEET_ID`
-8. 將服務帳戶的 email 加入 Google Sheet 的編輯權限
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the Google Sheets API
+4. Create a service account and download the JSON credentials file
+5. Rename the credentials file to `credentials.json` and place it in the project root
+6. Create a Google Sheet and get its Sheet ID
+7. Put the Sheet ID in `GOOGLE_SHEET_ID` in `.env`
+8. Give the service account's email edit access to the Google Sheet
 
-### 5. 授權用戶設定
+### 5. Authorized users
 
-1. 取得需要使用此功能的 LINE 用戶 ID
-2. 將用戶 ID 填入 `.env` 的 `AUTHORIZED_USERS`（用逗號分隔多個 ID）
-3. 或設定為 `*` 允許所有用戶使用（不建議生產環境使用）
+1. Get the LINE user IDs of the people who need this feature
+2. Put the user IDs in `AUTHORIZED_USERS` in `.env` (comma-separated for multiple IDs)
+3. Or set it to `*` to allow all users (not recommended for production)
 
-### 6. 啟動應用
+### 6. Start the app
 
 ```bash
-# 開發環境
+# Development
 python main.py
 
-# 生產環境
+# Production
 gunicorn main:app --bind 0.0.0.0:5000
 ```
 
-## 使用方式
+## Usage
 
-### 單一訂單流程
-1. 在 LINE 中向 Bot 發送 `#訂單` 或 `#order`
-2. 點選「開始建立訂單」按鈕
-3. 輸入單一訂單內容
-4. 系統解析並顯示結果供確認
-5. 點選「確認訂單」完成建立
+The commands, button labels and bot messages are in Chinese and are quoted here as they appear.
 
-### 多訂單流程
-1. 輸入包含多份訂單的訊息（最多 5 份）
-2. 系統會顯示「發現 X 份訂單！」
-3. 選擇「逐一確認」或「全部確認」
-4. 逐一確認時可翻閱每份訂單詳情
-5. 確認後所有訂單自動建立
+### Single order flow
+1. Send `#訂單` or `#order` to the bot in LINE
+2. Tap the 「開始建立訂單」 ("Start creating order") button
+3. Enter a single order
+4. The system parses it and shows the result for confirmation
+5. Tap 「確認訂單」 ("Confirm order") to finish
 
-### 解析失敗處理
-- 當多訂單解析失敗時，系統會建議逐筆輸入
-- 可選擇「單筆輸入」或「重新嘗試」
+### Multiple order flow
+1. Enter a message containing several orders (up to 5)
+2. The system shows 「發現 X 份訂單！」 ("Found X orders!")
+3. Choose 「逐一確認」 ("Confirm one by one") or 「全部確認」 ("Confirm all")
+4. When confirming one by one, you can page through each order's details
+5. After confirmation, all orders are created automatically
 
-## 訂單資訊格式
+### When parsing fails
+- When multi-order parsing fails, the system suggests entering orders one at a time
+- You can choose 「單筆輸入」 ("Single entry") or 「重新嘗試」 ("Retry")
 
-### 必填欄位
-- 收件人姓名與電話  
-- 商品品項與數量
-- 收件地址
+## Order Information Format
 
-### 選填欄位
-- 寄件人姓名與電話（未提供時顯示「未提供」）
-- 預計發貨日期
+### Required fields
+- Receiver name and phone
+- Items and quantities
+- Shipping address
 
-## 多訂單範例
+### Optional fields
+- Sender name and phone (shows 「未提供」 "not provided" when missing)
+- Expected shipping date
+
+## Multiple Order Example
+
+Sample input as a user would type it (roughly: "Order 1: send to 李大華 0923-456-789, address Xinyi District, Taipei..., item A x2", and so on):
 
 ```
 訂單1: 寄給李大華 0923-456-789，地址台北市信義區...，商品A x2
@@ -117,56 +121,56 @@ gunicorn main:app --bind 0.0.0.0:5000
 訂單3: 寄給王大明 0945-678-901，地址台中市...，商品C x3
 ```
 
-## 錯誤排除
+## Troubleshooting
 
-### 常見問題
+### Common problems
 
-1. **Bot 沒有回應**
-   - 確認 LINE_CHANNEL_ACCESS_TOKEN 和 LINE_CHANNEL_SECRET 正確
-   - 檢查 Webhook URL 是否正確設定
+1. **The bot does not respond**
+   - Make sure LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET are correct
+   - Check that the webhook URL is set correctly
 
-2. **OpenAI 解析問題**
-   - 確認 OPENAI_API_KEY 有效且有足夠額度
-   - 多訂單解析失敗時，嘗試逐筆輸入
-   - 檢查訂單數量是否超過 5 份限制
+2. **OpenAI parsing problems**
+   - Make sure OPENAI_API_KEY is valid and has enough quota
+   - If multi-order parsing fails, try entering orders one at a time
+   - Check whether the number of orders exceeds the limit of 5
 
-3. **Google Sheets 寫入失敗**
-   - 確認 credentials.json 檔案存在且格式正確
-   - 檢查服務帳戶是否有 Google Sheet 的編輯權限
-   - 確認 GOOGLE_SHEET_ID 正確
+3. **Google Sheets write failures**
+   - Make sure credentials.json exists and is in the right format
+   - Check that the service account has edit access to the Google Sheet
+   - Make sure GOOGLE_SHEET_ID is correct
 
-4. **多訂單處理問題**
-   - 若經常出現解析失敗，建議改用單筆輸入
-   - 檢查訂單格式是否清楚（每份訂單需包含收件人、商品、地址）
+4. **Multi-order processing problems**
+   - If parsing fails often, enter orders one at a time instead
+   - Check that the order format is clear (each order needs a receiver, items and an address)
 
-### 日誌查看
+### Viewing logs
 
-應用會在控制台輸出相關日誌，出現問題時可查看具體錯誤訊息。
+The app writes logs to the console; when something goes wrong, check them for the specific error message.
 
-### 效能優化建議
+### Performance tips
 
-1. **單筆輸入優先**：為了確保解析準確性，建議優先使用單筆輸入
-2. **格式標準化**：建立固定的訂單格式範本供用戶參考
-3. **批量處理**：對於大量訂單，建議分批處理以避免逾時
+1. **Prefer single entry**: to keep parsing accurate, entering one order at a time is recommended
+2. **Standardize the format**: create a fixed order template for users to follow
+3. **Batch processing**: for large numbers of orders, process them in batches to avoid timeouts
 
-## 安全注意事項
+## Security Notes
 
-1. 不要將 `.env` 檔案提交到版本控制系統
-2. 定期更換 API Keys
-3. 限制授權用戶範圍（建議不使用 `*` 允許所有用戶）
-4. 定期檢查 Google Sheets 的存取權限
-5. 監控 OpenAI API 使用量（多訂單解析會消耗更多 tokens）
+1. Do not commit the `.env` file to version control
+2. Rotate API keys regularly
+3. Limit the set of authorized users (avoid using `*` to allow everyone)
+4. Review Google Sheets access permissions regularly
+5. Monitor OpenAI API usage (multi-order parsing uses more tokens)
 
-## 更新日誌
+## Changelog
 
 ### v2.0
-- ✅ 寄件人資訊改為選填
-- ✅ 支援多訂單處理（最多5份）
-- ✅ 新增逐一確認流程
-- ✅ 優化錯誤處理機制
-- ✅ 改善用戶體驗流程
+- ✅ Sender information made optional
+- ✅ Multiple order support (up to 5)
+- ✅ New one-by-one confirmation flow
+- ✅ Improved error handling
+- ✅ Improved user flow
 
 ### v1.0
-- ✅ 基礎訂單處理功能
-- ✅ OpenAI 智能解析
-- ✅ Google Sheets 整合
+- ✅ Basic order processing
+- ✅ OpenAI smart parsing
+- ✅ Google Sheets integration

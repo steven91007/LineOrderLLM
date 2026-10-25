@@ -1,5 +1,5 @@
 """
-台灣地址補全與標準化工具
+Taiwan address completion and normalization utilities
 """
 import re
 from typing import Dict, List, Optional, Tuple
@@ -7,22 +7,22 @@ from .dspy_modules.address_normalizer import address_normalizer
 
 
 class TaiwanAddressNormalizer:
-    """台灣地址標準化處理器"""
+    """Taiwan address normalizer"""
     
     def __init__(self, use_ai: bool = True):
         self.use_ai = use_ai
         
-        # 縣市對照表（包含直轄市）
+        # City/county lookup table (including special municipalities)
         self.cities = {
-            # 直轄市
+            # Special municipalities
             '台北': '臺北市', '臺北': '臺北市', '台北市': '臺北市', '臺北市': '臺北市',
             '新北': '新北市', '新北市': '新北市',
-            '桃園': '桃園市', '桃園市': '桃園市', '桃園縣': '桃園市',  # 2014年升格
-            '台中': '臺中市', '臺中': '臺中市', '台中市': '臺中市', '臺中市': '臺中市', '台中縣': '臺中市',  # 2010年合併升格
-            '台南': '臺南市', '臺南': '臺南市', '台南市': '臺南市', '臺南市': '臺南市', '台南縣': '臺南市',  # 2010年合併升格
-            '高雄': '高雄市', '高雄市': '高雄市', '高雄縣': '高雄市',  # 2010年合併
+            '桃園': '桃園市', '桃園市': '桃園市', '桃園縣': '桃園市',  # Upgraded to a special municipality in 2014
+            '台中': '臺中市', '臺中': '臺中市', '台中市': '臺中市', '臺中市': '臺中市', '台中縣': '臺中市',  # Merged and upgraded in 2010
+            '台南': '臺南市', '臺南': '臺南市', '台南市': '臺南市', '臺南市': '臺南市', '台南縣': '臺南市',  # Merged and upgraded in 2010
+            '高雄': '高雄市', '高雄市': '高雄市', '高雄縣': '高雄市',  # Merged in 2010
             
-            # 縣
+            # Counties (and provincial cities)
             '基隆': '基隆市', '基隆市': '基隆市',
             '新竹市': '新竹市',
             '新竹': '新竹縣', '新竹縣': '新竹縣',
@@ -41,16 +41,16 @@ class TaiwanAddressNormalizer:
             '連江': '連江縣', '連江縣': '連江縣', '馬祖': '連江縣'
         }
         
-        # 區域對照表（縣市升格後的變更）
+        # District lookup table (renames after city/county upgrades)
         self.district_updates = {
-            # 桃園縣升格為桃園市（2014年）
+            # Taoyuan County upgraded to Taoyuan City (2014)
             '中壢市': '中壢區',
             '平鎮市': '平鎮區',
             '龍潭鄉': '龍潭區',
             '楊梅市': '楊梅區',
             '新屋鄉': '新屋區',
             '觀音鄉': '觀音區',
-            '桃園市': '桃園區',  # 原桃園市改為桃園區
+            '桃園市': '桃園區',  # The former Taoyuan City became Taoyuan District
             '龜山鄉': '龜山區',
             '八德市': '八德區',
             '大溪鎮': '大溪區',
@@ -58,7 +58,7 @@ class TaiwanAddressNormalizer:
             '大園鄉': '大園區',
             '蘆竹鄉': '蘆竹區',
             
-            # 臺中縣市合併（2010年）
+            # Taichung County and City merged (2010)
             '豐原市': '豐原區',
             '東勢鎮': '東勢區',
             '大甲鎮': '大甲區',
@@ -81,7 +81,7 @@ class TaiwanAddressNormalizer:
             '大里市': '大里區',
             '和平鄉': '和平區',
             
-            # 臺南縣市合併（2010年）
+            # Tainan County and City merged (2010)
             '永康市': '永康區',
             '歸仁鄉': '歸仁區',
             '新化鎮': '新化區',
@@ -114,7 +114,7 @@ class TaiwanAddressNormalizer:
             '新市鄉': '新市區',
             '安定鄉': '安定區',
             
-            # 高雄縣市合併（2010年）
+            # Kaohsiung County and City merged (2010)
             '鳳山市': '鳳山區',
             '林園鄉': '林園區',
             '大寮鄉': '大寮區',
@@ -144,9 +144,9 @@ class TaiwanAddressNormalizer:
             '那瑪夏鄉': '那瑪夏區'
         }
         
-        # 常見區域名稱對照表（用於地址補全）
+        # Common district name lookup (used for address completion)
         self.district_mapping = {
-            # 臺北市
+            # Taipei City
             '中正': ('臺北市', '中正區'),
             '大同': ('臺北市', '大同區'),
             '中山': ('臺北市', '中山區'),
@@ -160,7 +160,7 @@ class TaiwanAddressNormalizer:
             '南港': ('臺北市', '南港區'),
             '文山': ('臺北市', '文山區'),
             
-            # 新北市
+            # New Taipei City
             '板橋': ('新北市', '板橋區'),
             '三重': ('新北市', '三重區'),
             '中和': ('新北市', '中和區'),
@@ -191,7 +191,7 @@ class TaiwanAddressNormalizer:
             '萬里': ('新北市', '萬里區'),
             '烏來': ('新北市', '烏來區'),
             
-            # 桃園市
+            # Taoyuan City
             '桃園': ('桃園市', '桃園區'),
             '中壢': ('桃園市', '中壢區'),
             '平鎮': ('桃園市', '平鎮區'),
@@ -209,42 +209,42 @@ class TaiwanAddressNormalizer:
     
     def normalize_address(self, address: str) -> str:
         """
-        標準化地址格式（混合式：規則 + AI）
+        Normalize the address format (hybrid: rules + AI)
         
         Args:
-            address: 原始地址字串
+            address: Raw address string
             
         Returns:
-            標準化後的地址
+            The normalized address
         """
         if not address:
             return address
         
-        # 如果啟用 AI 且地址比較複雜，使用 DSPy 處理
+        # If AI is enabled and the address is complex, process it with DSPy
         if self.use_ai:
             try:
                 result = address_normalizer(address)
                 ai_normalized = result.normalized_address
                 
-                # AI 處理後再用規則進行後處理
+                # After AI processing, post-process with rules
                 return self._post_process_with_rules(ai_normalized)
             except Exception:
-                # AI 失敗時 fallback 到規則處理
+                # If AI fails, fall back to rule-based processing
                 pass
         
-        # 規則處理
+        # Rule-based processing
         return self._normalize_with_rules(address)
     
     def _is_complex_address(self, address: str) -> bool:
-        """判斷是否為需要 AI 處理的複雜地址"""
+        """Determine whether this is a complex address that needs AI processing"""
         complex_indicators = [
-            # 包含舊地名
+            # Contains old place names
             '桃園縣', '台中縣', '臺中縣', '台南縣', '臺南縣', '高雄縣',
-            # 不完整地址（只有區域名）
+            # Incomplete address (district name only)
             r'^[^市縣]+區(?!.*[市縣])',
-            # 包含錯別字的可能性
+            # Possible variant/incorrect characters
             '臺', '台',
-            # 不標準格式
+            # Non-standard format
             r'^\s*[一二三四五六七八九十]+\s*[、，。]',
         ]
         
@@ -256,47 +256,47 @@ class TaiwanAddressNormalizer:
                 if re.search(indicator, address):
                     return True
         
-        # 地址太短可能不完整，需要 AI 判斷
+        # A very short address may be incomplete; let the AI decide
         if len(address.strip()) < 8:
             return True
             
         return False
     
     def _normalize_with_rules(self, address: str) -> str:
-        """純規則處理地址標準化"""
-        # 移除多餘空白
+        """Normalize the address using rules only"""
+        # Remove extra whitespace
         address = ' '.join(address.split())
         
-        # 先統一「台」為「臺」
+        # First normalize "台" to "臺"
         address = address.replace('台北', '臺北').replace('台中', '臺中').replace('台南', '臺南').replace('台東', '臺東')
         
-        # 處理縣市
+        # Handle city/county
         address = self._update_city(address)
         
-        # 處理區域升格
+        # Handle district upgrades
         address = self._update_district(address)
         
-        # 補全地址
+        # Complete the address
         address = self._complete_address(address)
         
         return address
     
     def _post_process_with_rules(self, address: str) -> str:
-        """AI 處理後的規則後處理"""
+        """Rule-based post-processing after AI processing"""
         if not address:
             return address
             
-        # 確保統一用字
+        # Ensure consistent characters
         address = address.replace('台北', '臺北').replace('台中', '臺中').replace('台南', '臺南').replace('台東', '臺東')
         
-        # 移除多餘空白
+        # Remove extra whitespace
         address = ' '.join(address.split())
         
         return address
     
     def _update_city(self, address: str) -> str:
-        """更新縣市名稱"""
-        # 先處理縣市升格的特殊情況
+        """Update the city/county name"""
+        # First handle the special case of upgraded cities/counties
         upgrade_mappings = [
             ('桃園縣', '桃園市'),
             ('臺中縣', '臺中市'),
@@ -308,17 +308,17 @@ class TaiwanAddressNormalizer:
         
         for old_county, new_city in upgrade_mappings:
             if old_county in address:
-                # 先更新區域名稱
+                # Update the district name first
                 for old_district, new_district in self.district_updates.items():
                     if old_district in address:
                         address = address.replace(old_district, new_district)
-                # 再更新縣市名稱
+                # Then update the city/county name
                 address = address.replace(old_county, new_city)
                 return address
         
-        # 處理一般的縣市名稱
+        # Handle ordinary city/county names
         for old_name, new_name in self.cities.items():
-            # 避免重複替換（例如「台北市」變成「臺北市市」）
+            # Avoid double replacement (e.g. "台北市" becoming "臺北市市")
             if old_name in address and new_name not in address:
                 address = address.replace(old_name, new_name)
                 break
@@ -326,7 +326,7 @@ class TaiwanAddressNormalizer:
         return address
     
     def _update_district(self, address: str) -> str:
-        """更新區域名稱（鄉鎮市改為區）"""
+        """Update district names (townships/towns/county cities become districts)"""
         for old_district, new_district in self.district_updates.items():
             if old_district in address:
                 address = address.replace(old_district, new_district)
@@ -334,28 +334,28 @@ class TaiwanAddressNormalizer:
         return address
     
     def _complete_address(self, address: str) -> str:
-        """補全地址（當只有區域名稱時）"""
-        # 檢查是否已包含縣市
+        """Complete the address (when only the district name is present)"""
+        # Check whether a city/county is already present
         has_city = any(city in address for city in self.cities.values())
         
         if not has_city:
-            # 嘗試從區域名稱推斷縣市
+            # Try to infer the city/county from the district name
             for district_name, (city, full_district) in self.district_mapping.items():
-                # 檢查是否包含區域名稱
+                # Check whether the district name is present
                 if f"{district_name}區" in address:
-                    # 已有區名，只補全縣市名
+                    # District already present; only prepend the city/county
                     address = f"{city}{address}"
                     break
                 elif district_name in address:
-                    # 檢查後面是否緊接著是路、街等
+                    # Check whether it is immediately followed by 路, 街, etc. (road/street)
                     import re
                     pattern = rf'{district_name}[路街道巷弄里村]'
                     if re.search(pattern, address):
-                        # 補全區名和縣市名
+                        # Complete both the district and city/county names
                         address = address.replace(district_name, full_district)
                         address = f"{city}{address}"
                         break
-                    # 或者是在字串結尾
+                    # Or it is at the end of the string
                     elif address.endswith(district_name):
                         address = address.replace(district_name, full_district)
                         address = f"{city}{address}"
@@ -365,35 +365,35 @@ class TaiwanAddressNormalizer:
     
     def extract_components(self, address: str) -> Dict[str, Optional[str]]:
         """
-        解析地址成各個組成部分
+        Parse the address into its components
         
         Returns:
-            包含 city, district, road, detail 的字典
+            A dict containing city, district, road, detail
         """
         normalized = self.normalize_address(address)
         
-        # 縣市
+        # City/county
         city = None
         for city_name in self.cities.values():
             if city_name in normalized:
                 city = city_name
                 break
         
-        # 區域
+        # District
         district = None
         district_pattern = r'([^市縣]+?[區鄉鎮市])'
         district_match = re.search(district_pattern, normalized)
         if district_match:
             district = district_match.group(1)
         
-        # 路街
+        # Road/street
         road = None
         road_pattern = r'([^區鄉鎮市]+?[路街道巷弄](?:\d+段)?)'
         road_match = re.search(road_pattern, normalized)
         if road_match:
             road = road_match.group(1)
         
-        # 詳細地址（門牌等）
+        # Detailed address (house number, etc.)
         detail = None
         detail_pattern = r'(\d+(?:之\d+)?號(?:.+)?)'
         detail_match = re.search(detail_pattern, normalized)
@@ -410,10 +410,11 @@ class TaiwanAddressNormalizer:
     
     def validate_address(self, address: str) -> Tuple[bool, Optional[str]]:
         """
-        驗證地址格式是否完整
+        Validate that the address is complete
         
         Returns:
-            (是否有效, 錯誤訊息)
+            (is_valid, error_message)
+            Error messages are kept in Chinese because they may be shown to staff.
         """
         components = self.extract_components(address)
         

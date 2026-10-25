@@ -1,6 +1,9 @@
 """
-價格計算模組
-用於根據商品資訊計算總價格和運費
+Price calculation module
+Computes the total price and shipping from product information.
+
+Note: price-list keys, product names and the detail strings returned below are Chinese on purpose
+(matched against data / shown in order output) and must not be translated.
 """
 
 import re
@@ -12,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 class PriceCalculator:
     def __init__(self):
-        """初始化價格計算器"""
+        """Initialize the price calculator"""
         self.price_list = {
-            "家庭號": {  # 一箱兩層、12顆
+            "家庭號": {  # Family pack: one case, two layers, 12 pieces
                 "18A 優惠首選": {
                     "價格": 1850
                 },
@@ -22,10 +25,10 @@ class PriceCalculator:
                     "價格": 2110,
                 }
             },
-            "雙雙對對": {  # 固定單價，不分規格
+            "雙雙對對": {  # Fixed unit price, no size variants
                 "雙雙對對": {"價格": 3400}
             },
-            "精選禮盒": {  # 一盒一層、每盒6顆
+            "精選禮盒": {  # Gift box: one layer per box, 6 pieces per box
                 "18A 優惠首選": {
                     "重量範圍": "600g ~ 635g",
                     "1": {"價格": 1020},
@@ -45,13 +48,13 @@ class PriceCalculator:
     
     def calculate_total_price(self, items: List[Dict[str, Any]]) -> Tuple[int, str]:
         """
-        計算商品總價（價格已包含運費）
+        Calculate the total price of the items (prices already include shipping)
         
         Args:
-            items: 商品列表，每個商品包含 name 和 quantity
+            items: List of items, each with name and quantity
             
         Returns:
-            tuple: (總價, 詳細說明)
+            tuple: (total price, detail text)
         """
         if not items:
             return 0, "無商品"
@@ -66,13 +69,13 @@ class PriceCalculator:
             if not name or quantity <= 0:
                 continue
             
-            # 解析商品資訊
+            # Parse the product info
             product_info = self._parse_product_name(name)
             if not product_info:
                 details.append(f"{name} x {quantity}: 無法識別商品")
                 continue
             
-            # 計算該商品的價格（已包含運費）
+            # Calculate this item's price (shipping included)
             item_price, item_detail = self._calculate_item_price(
                 product_info, quantity
             )
@@ -91,40 +94,40 @@ class PriceCalculator:
     
     def _parse_product_name(self, name: str) -> Dict[str, Any]:
         """
-        解析商品名稱，提取產品類型和規格
+        Parse a product name, extracting the product type and size spec
         
         Args:
-            name: 商品名稱
+            name: Product name
             
         Returns:
-            dict: 解析結果 {type, spec} 或 None
+            dict: Parse result {type, spec}, or None
         """
         name = name.strip()
         
-        # 去除空白字元，讓 "18 A" 變成 "18A"
+        # Strip whitespace so "18 A" becomes "18A"
         name = re.sub(r'\s+', '', name)
 
-        # 雙雙對對：固定單價商品，不分 18A/20A 規格
+        # "雙雙對對": fixed-price product with no 18A/20A size spec
         if '雙雙對對' in name:
             return {"type": "雙雙對對", "spec": "雙雙對對"}
 
-        # 匹配 18A 或 20A 規格（包含空白的情況）
+        # Match the 18A or 20A spec (including variants with whitespace)
         spec_match = re.search(r'(18\s*A|20\s*A)', name, re.IGNORECASE)
         if not spec_match:
             return None
         
         spec = re.sub(r'\s+', '', spec_match.group(1).upper())
         
-        # 判斷產品類型
+        # Determine the product type
         if any(keyword in name for keyword in ['家庭號', '家庭', '一箱']):
             product_type = "家庭號"
         elif any(keyword in name for keyword in ['禮盒', '精選', '盒']):
             product_type = "精選禮盒"
         else:
-            # 預設為禮盒
+            # Default to gift box
             product_type = "精選禮盒"
         
-        # 根據規格確定完整產品名稱
+        # Resolve the full product spec name from the size
         if spec == "18A":
             full_spec = "18A 優惠首選"
         elif spec == "20A":
@@ -142,14 +145,14 @@ class PriceCalculator:
     
     def _calculate_item_price(self, product_info: Dict[str, Any], quantity: int) -> Tuple[int, str]:
         """
-        計算單一商品的價格（已包含運費）
+        Calculate the price of a single item (shipping included)
         
         Args:
-            product_info: 商品資訊
-            quantity: 數量
+            product_info: Product info
+            quantity: Quantity
             
         Returns:
-            tuple: (總價格, 詳細說明)
+            tuple: (total price, detail text)
         """
         product_type = product_info["type"]
         spec = product_info["spec"]
@@ -164,7 +167,7 @@ class PriceCalculator:
         spec_info = type_info[spec]
         
         if product_type == "雙雙對對":
-            # 固定單價，直接按數量計算
+            # Fixed unit price: just multiply by quantity
             unit_price = spec_info["價格"]
             total_price = unit_price * quantity
 
@@ -172,7 +175,7 @@ class PriceCalculator:
             return total_price, detail
 
         if product_type == "家庭號":
-            # 家庭號：直接按數量計算（一箱12顆）
+            # Family pack: just multiply by quantity (12 pieces per case)
             unit_price = spec_info["價格"]
             total_price = unit_price * quantity
 
@@ -180,32 +183,32 @@ class PriceCalculator:
             return total_price, detail
 
         elif product_type == "精選禮盒":
-            # 精選禮盒：直接按盒數計算
+            # Gift box: priced by number of boxes
             return self._calculate_giftbox_price(spec_info, quantity)
         
         return 0, "計算錯誤"
     
     def _calculate_giftbox_price(self, spec_info: Dict[str, Any], total_quantity: int) -> Tuple[int, str]:
         """
-        計算精選禮盒的最優惠價格組合（已包含運費）
+        Calculate the best-value price combination for gift boxes (shipping included)
         
         Args:
-            spec_info: 規格資訊
-            total_quantity: 總數量（顆數）
+            spec_info: Spec info
+            total_quantity: Total quantity (number of pieces)
             
         Returns:
-            tuple: (總價格, 詳細說明)
+            tuple: (total price, detail text)
         """
-        # 新的定價結構：直接按盒數計算
-        # total_quantity 在這裡已經是盒數了，不需要再除以6
+        # New pricing structure: priced directly by number of boxes
+        # total_quantity is already a box count here; no need to divide by 6
         boxes_needed = total_quantity
         
-        # 根據盒數選擇對應價格
+        # Pick the price matching the box count
         if str(boxes_needed) in spec_info:
             total_price = spec_info[str(boxes_needed)]["價格"]
             detail = f"{boxes_needed}盒"
         elif boxes_needed <= 4:
-            # 如果盒數在1-4範圍內，直接使用對應價格
+            # If the box count is within 1-4, use the matching price directly
             price_key = str(min(boxes_needed, 4))
             if price_key in spec_info:
                 total_price = spec_info[price_key]["價格"]
@@ -214,7 +217,7 @@ class PriceCalculator:
                 total_price = 0
                 detail = "找不到對應價格"
         else:
-            # 超過4盒的情況，使用4盒價格作為基準
+            # More than 4 boxes: use the 4-box price as the base
             if "4" in spec_info:
                 base_price_per_4_boxes = spec_info["4"]["價格"]
                 sets_of_4 = boxes_needed // 4
@@ -234,13 +237,13 @@ class PriceCalculator:
     
     def get_product_info(self, name: str) -> Dict[str, Any]:
         """
-        獲取商品詳細資訊
+        Get detailed product info
         
         Args:
-            name: 商品名稱
+            name: Product name
             
         Returns:
-            dict: 商品資訊或空字典
+            dict: Product info, or an empty dict
         """
         product_info = self._parse_product_name(name)
         if not product_info:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flask 應用程式 - 整合 LIFF 訂單編輯功能
+Flask application - with the LIFF order editor integrated
 """
 import os
 import logging
@@ -15,34 +15,34 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
 from src.handlers.order_handler import OrderHandler
 from src.handlers.liff_handler import setup_liff_routes
 
-# 載入環境變數
+# Load environment variables
 load_dotenv()
 
-# 設定 logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask 應用程式初始化
+# Initialize the Flask application
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 
-# LINE Bot 設定
+# LINE Bot settings
 CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
-LIFF_ID = os.getenv('LIFF_ID')  # LIFF 應用程式 ID
+LIFF_ID = os.getenv('LIFF_ID')  # LIFF app ID
 
-# 伺服器設定
-BASE_URL = os.getenv('BASE_URL')  # 伺服器基礎 URL (e.g., https://your-domain.com)
+# Server settings
+BASE_URL = os.getenv('BASE_URL')  # Server base URL (e.g., https://your-domain.com)
 
-# DSPy/OpenAI 設定
+# DSPy/OpenAI settings
 DSPY_API_KEY = os.getenv('DSPY_API_KEY') or os.getenv('OPENAI_API_KEY')
 DSPY_MODEL = os.getenv('DSPY_MODEL', 'gpt-4o-mini')
 
-# Google Sheets 設定
+# Google Sheets settings
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
 
-# 授權用戶列表
+# Authorized user list
 AUTHORIZED_USERS = os.getenv('AUTHORIZED_USERS', '*').split(',')
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
@@ -53,11 +53,11 @@ if not DSPY_API_KEY:
     logger.error("Missing DSPy/OpenAI API key")
     exit(1)
 
-# 初始化 LINE Bot SDK
+# Initialize the LINE Bot SDK
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# 初始化訂單處理器
+# Initialize the order handler
 order_handler = OrderHandler(
     configuration=configuration,
     authorized_users=AUTHORIZED_USERS,
@@ -66,16 +66,16 @@ order_handler = OrderHandler(
     dspy_model=DSPY_MODEL,
     google_sheet_id=GOOGLE_SHEET_ID,
     google_credentials_path=GOOGLE_CREDENTIALS_PATH,
-    liff_id=LIFF_ID,  # 傳入 LIFF ID
-    base_url=BASE_URL  # 傳入伺服器基礎 URL
+    liff_id=LIFF_ID,  # Pass in the LIFF ID
+    base_url=BASE_URL  # Pass in the server base URL
 )
 
-# 設定 LIFF 路由
+# Register the LIFF routes
 setup_liff_routes(app, order_handler.liff_handler)
 
 @app.route("/", methods=['GET'])
 def home():
-    """首頁"""
+    """Home page (the HTML below is user-facing and stays in Chinese)."""
     return """
     <h1>LINE 訂單處理系統</h1>
     <h2>🌐 LIFF 版本</h2>
@@ -99,14 +99,14 @@ def home():
 @app.route("/callback", methods=['POST'])
 def callback():
     """LINE webhook callback"""
-    # 獲取 X-Line-Signature header 值
+    # Get the X-Line-Signature header value
     signature = request.headers['X-Line-Signature']
 
-    # 獲取 request body 為 text
+    # Get the request body as text
     body = request.get_data(as_text=True)
     app.logger.info("Request body: " + body)
 
-    # 處理 webhook body
+    # Handle the webhook body
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
@@ -117,7 +117,7 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """處理文字訊息事件"""
+    """Handle text message events."""
     try:
         order_handler.handle_text_message(event)
     except Exception as e:
@@ -125,7 +125,7 @@ def handle_message(event):
 
 @handler.add(PostbackEvent)
 def handle_postback(event):
-    """處理 Postback 事件"""
+    """Handle postback events."""
     try:
         order_handler.handle_postback(event)
     except Exception as e:
@@ -133,7 +133,7 @@ def handle_postback(event):
 
 @app.route('/health')
 def health_check():
-    """健康檢查"""
+    """Health check."""
     return {
         'status': 'healthy',
         'features': {
@@ -145,7 +145,7 @@ def health_check():
 
 @app.route('/liff/demo')
 def liff_demo():
-    """LIFF 示範頁面（用於測試）"""
+    """LIFF demo page (for testing)."""
     demo_orders = [
         {
             'receiver_name': '王小明',
@@ -158,7 +158,7 @@ def liff_demo():
         }
     ]
     
-    # 建立示範會話
+    # Create a demo session
     session_id = order_handler.liff_handler.create_liff_session('demo_user', {
         'orders': demo_orders,
         'total_orders': 1
@@ -177,13 +177,13 @@ def liff_demo():
     '''
 
 if __name__ == "__main__":
-    # 定期清理過期的 LIFF 會話
+    # Periodically clean up expired LIFF sessions
     import threading
     import time
     
     def cleanup_sessions():
         while True:
-            time.sleep(3600)  # 每小時清理一次
+            time.sleep(3600)  # Clean up once an hour
             try:
                 order_handler.liff_handler.cleanup_expired_sessions()
             except Exception as e:

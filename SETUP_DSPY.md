@@ -1,159 +1,159 @@
-# DSPy 整合指南
+# DSPy Integration Guide
 
-## 🎯 DSPy 整合概述
+## 🎯 DSPy Integration Overview
 
-本版本新增了 DSPy (Declarative Self-improving Language Programs) 支援，提供更結構化和可靠的訂單解析功能。
+This version adds DSPy (Declarative Self-improving Language Programs) support, providing more structured and reliable order parsing.
 
-### ✨ DSPy 優勢
+### ✨ DSPy advantages
 
-1. **結構化推理**：使用 Signature 定義明確的輸入輸出格式
-2. **強制 JSON 輸出**：確保回應格式一致性
-3. **自動優化**：DSPy 可以自動優化 prompt 效果
-4. **模組化設計**：解析流程分解為獨立模組
-5. **更好的錯誤處理**：多層驗證機制
+1. **Structured reasoning**: Signatures define explicit input/output formats
+2. **Enforced JSON output**: keeps response formats consistent
+3. **Automatic optimization**: DSPy can optimize prompts automatically
+4. **Modular design**: the parsing flow is split into independent modules
+5. **Better error handling**: multi-layer validation
 
-## 🔧 DSPy 架構設計
+## 🔧 DSPy Architecture
 
-### 核心模組
+### Core modules
 
 ```
 DSPyOrderClient
-├── OrderTypeClassifier    # 識別單一/多訂單
-├── SingleOrderParser      # 單一訂單解析
-├── MultiOrderParser       # 多訂單解析（最多5份）
-└── OrderValidator         # 資料驗證
+├── OrderTypeClassifier    # Detects single vs. multiple orders
+├── SingleOrderParser      # Single-order parsing
+├── MultiOrderParser       # Multi-order parsing (up to 5)
+└── OrderValidator         # Data validation
 ```
 
-### Signature 定義
+### Signature definitions
 
 ```python
 class SingleOrderSignature(dspy.Signature):
-    """解析單一訂單並輸出 JSON 格式"""
-    order_text = dspy.InputField(desc="單一訂單文字")
-    order_json = dspy.OutputField(desc="結構化 JSON 資料")
+    """Parse a single order and output JSON"""
+    order_text = dspy.InputField(desc="Single order text")
+    order_json = dspy.OutputField(desc="Structured JSON data")
 
 class MultiOrderSignature(dspy.Signature):
-    """解析多訂單並輸出 JSON 格式"""
-    order_text = dspy.InputField(desc="多訂單文字")
-    orders_json = dspy.OutputField(desc="多訂單 JSON 資料")
+    """Parse multiple orders and output JSON"""
+    order_text = dspy.InputField(desc="Multi-order text")
+    orders_json = dspy.OutputField(desc="Multi-order JSON data")
 ```
 
-### JSON Schema 驗證
+### JSON Schema validation
 
-系統使用嚴格的 JSON Schema 驗證：
+The system uses strict JSON Schema validation:
 
 ```json
 {
   "order_type": "single",
-  "sender_name": null,        // 選填
-  "sender_phone": null,       // 選填
-  "receiver_name": "必填",
-  "receiver_phone": "必填",
+  "sender_name": null,        // optional
+  "sender_phone": null,       // optional
+  "receiver_name": "required",
+  "receiver_phone": "required",
   "items": [
-    {"name": "商品名", "quantity": 1}
+    {"name": "product name", "quantity": 1}
   ],
-  "shipping_date": null,      // 選填
-  "shipping_address": "必填"
+  "shipping_date": null,      // optional
+  "shipping_address": "required"
 }
 ```
 
-## ⚙️ 設定指南
+## ⚙️ Configuration
 
-### 1. 環境變數設定
+### 1. Environment variables
 
-在 `.env` 檔案中新增：
+Add to your `.env` file:
 
 ```bash
-# DSPy 設定
-DSPY_API_KEY=your_openai_api_key_here  # 可與 OPENAI_API_KEY 相同
+# DSPy settings
+DSPY_API_KEY=your_openai_api_key_here  # Can be the same as OPENAI_API_KEY
 DSPY_MODEL=gpt-4-0125-preview
 DSPY_MAX_RETRIES=3
 
-# 選擇訂單解析客戶端類型
-ORDER_CLIENT_TYPE=dspy  # 'openai' 或 'dspy'
+# Choose the order parsing client type
+ORDER_CLIENT_TYPE=dspy  # 'openai' or 'dspy'
 ```
 
-### 2. 安裝相依套件
+### 2. Install dependencies
 
 ```bash
 pip install dspy-ai==2.4.9 jsonschema==4.20.0
 ```
 
-### 3. 客戶端切換
+### 3. Switching clients
 
-系統支援在 OpenAI 和 DSPy 客戶端之間無縫切換：
+The system can switch seamlessly between the OpenAI and DSPy clients:
 
-- 設定 `ORDER_CLIENT_TYPE=openai` 使用原始 OpenAI 客戶端
-- 設定 `ORDER_CLIENT_TYPE=dspy` 使用新的 DSPy 客戶端
+- Set `ORDER_CLIENT_TYPE=openai` to use the original OpenAI client
+- Set `ORDER_CLIENT_TYPE=dspy` to use the new DSPy client
 
-## 🧪 測試 DSPy 功能
+## 🧪 Testing DSPy
 
-執行測試腳本驗證 DSPy 功能：
+Run the test script to verify DSPy functionality:
 
 ```bash
 python test_dspy.py
 ```
 
-測試涵蓋：
-- ✅ 單一訂單解析
-- ✅ 多訂單解析（2-5份）
-- ✅ 錯誤處理機制
-- ✅ JSON 格式驗證
+The tests cover:
+- ✅ Single-order parsing
+- ✅ Multi-order parsing (2-5 orders)
+- ✅ Error handling
+- ✅ JSON format validation
 
-## 📊 效能比較
+## 📊 Comparison
 
-| 特性 | OpenAI 客戶端 | DSPy 客戶端 |
+| Feature | OpenAI client | DSPy client |
 |------|---------------|-------------|
-| JSON 格式保證 | 基本 | 強制 |
-| 錯誤處理 | 標準 | 多層驗證 |
-| 模組化程度 | 低 | 高 |
-| 可擴展性 | 中等 | 高 |
-| 自動優化 | 無 | 支援 |
+| JSON format guarantee | Basic | Enforced |
+| Error handling | Standard | Multi-layer validation |
+| Modularity | Low | High |
+| Extensibility | Medium | High |
+| Automatic optimization | None | Supported |
 
-## 🔄 遷移指南
+## 🔄 Migration Guide
 
-### 從 OpenAI 遷移到 DSPy
+### Migrating from OpenAI to DSPy
 
-1. **無需修改現有程式碼**：兩種客戶端提供相同的介面
-2. **逐步遷移**：可先測試 DSPy，確認無誤後完全切換
-3. **回滾支援**：隨時可切換回 OpenAI 客戶端
+1. **No changes to existing code**: both clients expose the same interface
+2. **Gradual migration**: test DSPy first, then switch fully once it checks out
+3. **Rollback support**: switch back to the OpenAI client at any time
 
-### 設定步驟
+### Steps
 
 ```bash
-# 1. 安裝 DSPy 相依套件
+# 1. Install DSPy dependencies
 pip install dspy-ai jsonschema
 
-# 2. 更新環境變數
+# 2. Update environment variables
 echo "ORDER_CLIENT_TYPE=dspy" >> .env
 
-# 3. 測試功能
+# 3. Test
 python test_dspy.py
 
-# 4. 重啟應用
+# 4. Restart the app
 python main.py
 ```
 
-## 🛡️ 錯誤處理增強
+## 🛡️ Improved Error Handling
 
-DSPy 客戶端提供更完善的錯誤處理：
+The DSPy client provides more thorough error handling:
 
-1. **JSON 格式驗證**：使用 JSONSchema 嚴格驗證
-2. **業務邏輯驗證**：檢查必填欄位、電話格式等
-3. **重試機制**：解析失敗時自動重試（最多3次）
-4. **回退策略**：多訂單解析失敗時建議單筆輸入
+1. **JSON format validation**: strict validation with JSONSchema
+2. **Business-logic validation**: checks required fields, phone formats, etc.
+3. **Retries**: automatically retries on parse failure (up to 3 times)
+4. **Fallback strategy**: suggests entering orders one at a time when multi-order parsing fails
 
-## 📈 進階功能
+## 📈 Advanced
 
-### 自訂 DSPy 模組
+### Custom DSPy modules
 
-可以擴展新的 DSPy 模組：
+You can add new DSPy modules:
 
 ```python
 class CustomOrderSignature(dspy.Signature):
-    """自訂訂單解析邏輯"""
-    order_text = dspy.InputField(desc="訂單文字")
-    custom_output = dspy.OutputField(desc="自訂輸出格式")
+    """Custom order parsing logic"""
+    order_text = dspy.InputField(desc="Order text")
+    custom_output = dspy.OutputField(desc="Custom output format")
 
 class CustomOrderParser(dspy.Module):
     def __init__(self):
@@ -163,37 +163,37 @@ class CustomOrderParser(dspy.Module):
         return self.parse(order_text=order_text)
 ```
 
-### 模型微調支援
+### Model fine-tuning support
 
-DSPy 支援模型微調和優化：
+DSPy supports model fine-tuning and optimization:
 
 ```python
-# 未來可以加入訓練資料進行優化
+# Training data can be added later for optimization
 trainset = [...]
 teleprompter = BootstrapFewShot(metric=validate_order)
 compiled_parser = teleprompter.compile(parser, trainset=trainset)
 ```
 
-## 🚨 注意事項
+## 🚨 Caveats
 
-1. **API 使用量**：DSPy 可能會產生更多 API 呼叫（重試、驗證）
-2. **回應延遲**：由於多層驗證，可能略微增加處理時間
-3. **相容性**：完全相容現有 LINE Bot 功能
+1. **API usage**: DSPy may make more API calls (retries, validation)
+2. **Response latency**: multi-layer validation may slightly increase processing time
+3. **Compatibility**: fully compatible with existing LINE Bot features
 
-## 🔮 未來規劃
+## 🔮 Roadmap
 
-1. **模型優化**：收集使用資料進行 DSPy 模型優化
-2. **本地模型支援**：支援本地 LLM（如 Ollama）
-3. **更多驗證規則**：加入更細緻的業務邏輯驗證
-4. **效能監控**：新增 DSPy 效能監控儀表板
+1. **Model optimization**: collect usage data to optimize the DSPy modules
+2. **Local model support**: support local LLMs (e.g. Ollama)
+3. **More validation rules**: finer-grained business-logic validation
+4. **Performance monitoring**: add a DSPy performance monitoring dashboard
 
 ---
 
-## 💡 最佳實踐
+## 💡 Best Practices
 
-1. **開發環境先測試**：在正式環境前先在開發環境測試 DSPy
-2. **監控 API 使用量**：注意 DSPy 的 API 呼叫次數
-3. **保留 OpenAI 備案**：可隨時切換回 OpenAI 客戶端
-4. **定期執行測試**：使用 `test_dspy.py` 定期驗證功能
+1. **Test in development first**: test DSPy in a development environment before production
+2. **Monitor API usage**: keep an eye on DSPy's API call count
+3. **Keep OpenAI as a fallback**: you can switch back to the OpenAI client at any time
+4. **Run tests regularly**: use `test_dspy.py` to verify functionality periodically
 
-使用 DSPy 可以獲得更穩定、可靠的訂單解析體驗！
+DSPy gives you a more stable, reliable order parsing experience!

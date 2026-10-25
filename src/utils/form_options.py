@@ -1,17 +1,19 @@
 """
-Google 表單回覆試算表的欄位與下拉選項對照
+Column and dropdown-option mapping for the Google Form response spreadsheet
 
-這份對照表對應「2026 開家門快樂 訂購表單 (回覆)」的『表單回覆 1』分頁。
-品項欄位存的是表單下拉選項的**完整字串**（例如 `20A 一盒 $1,150`），
-所以聊天紀錄解析出的「規格 + 數量」必須先在這裡轉成正確的選項字串，
-不能讓 LLM 自由發揮，否則寫進去的值會和表單本身的選項對不起來。
+This mapping corresponds to the 『表單回覆 1』 (Form Responses 1) tab of
+"2026 開家門快樂 訂購表單 (回覆)".
+Item columns store the **full string** of the form's dropdown option (e.g.
+`20A 一盒 $1,150`), so the "size + quantity" parsed from the chat log must be
+converted here into the exact option string. The LLM must not improvise,
+otherwise the written value won't match the form's own options.
 
-價格來源：src/utils/price_calculator.py 的 price_list（已含運費）。
+Price source: price_list in src/utils/price_calculator.py (shipping included).
 """
 
 from typing import Dict, Optional, Tuple
 
-# 『表單回覆 1』的欄位順序（A~L）
+# Column order of 『表單回覆 1』 (A-L)
 FORM_COLUMNS = [
     '時間戳記',                                    # A
     '訂購人 (請留LINE上的大名 方便與您聯絡)',        # B
@@ -24,23 +26,28 @@ FORM_COLUMNS = [
     '(禮盒) 欲訂購的品項',                          # I
     '(家庭號) 欲訂購的品項',                        # J
     '匯款資料如下 請填入匯款後五碼以利核對',          # K
-    '欲配送日期 ',                                 # L（結尾有空白，是表單原本的標題）
+    '欲配送日期 ',                                 # L (the trailing space is part of the form's original header)
 ]
 
 FORM_RANGE = 'A:L'
 
-# 盒數的中文數字（表單選項用中文，不是阿拉伯數字）
-# 以下兩張表逐字對應 Google 表單的下拉選項，於 2026-08-13 與表單原文核對過。
+# Box counts use Chinese numerals (the form options use Chinese, not Arabic digits).
+# The two tables below match the Google Form dropdown options verbatim; they were
+# checked against the form's original text on 2026-08-13.
 #
-# 有三個容易踩到的坑，改動時請保持原樣：
-#   1. 禮盒用中文數字（一盒、兩盒…），家庭號用阿拉伯數字（1箱、2箱…），兩者不一致。
-#   2. 「2」在禮盒寫作「兩盒」，不是「二盒」。
-#   3. 18A 七盒與八盒的價格在表單裡沒有千分位逗號（$6510、$7400），
-#      其餘選項都有。這是表單本身的筆誤，但寫入值必須和選項完全一致，所以照抄。
+# Three easy pitfalls - keep them exactly as-is when editing:
+#   1. Gift boxes use Chinese numerals (一盒, 兩盒, ...) while family packs use
+#      Arabic digits (1箱, 2箱, ...); the two are inconsistent.
+#   2. "2" for gift boxes is written "兩盒", not "二盒".
+#   3. The 18A 七盒 and 八盒 (7 and 8 boxes) prices have no thousands separator in
+#      the form ($6510, $7400), unlike every other option. It's a typo in the form
+#      itself, but written values must match the options exactly, so it's copied as-is.
 FORM_OPTIONS_VERIFIED_ON = '2026-08-13'
 
-# 精選禮盒（一盒一層 6 顆）：級距定價，整段報價而非單價乘數量。
-# 五盒以上會分成兩箱寄出，選項字串帶有「(兩箱寄出)」註記。
+# 精選禮盒 (premium gift box, one layer of 6 per box): tiered pricing - each tier
+# has its own total price rather than unit price x quantity.
+# Five or more boxes ship as two parcels, and the option string carries the
+# "(兩箱寄出)" (shipped in two boxes) note.
 GIFTBOX_OPTIONS: Dict[Tuple[str, int], str] = {
     ('18A', 1): '18A 一盒 $1,020',
     ('18A', 2): '18A 兩盒 $1,910',
@@ -48,8 +55,8 @@ GIFTBOX_OPTIONS: Dict[Tuple[str, int], str] = {
     ('18A', 4): '18A 四盒 $3,700',
     ('18A', 5): '18A 五盒 $4,720 (兩箱寄出)',
     ('18A', 6): '18A 六盒 $5,610 (兩箱寄出)',
-    ('18A', 7): '18A 七盒 $6510 (兩箱寄出)',   # 表單原文無逗號
-    ('18A', 8): '18A 八盒 $7400 (兩箱寄出)',   # 表單原文無逗號
+    ('18A', 7): '18A 七盒 $6510 (兩箱寄出)',   # No comma in the original form text
+    ('18A', 8): '18A 八盒 $7400 (兩箱寄出)',   # No comma in the original form text
     ('20A', 1): '20A 一盒 $1,150',
     ('20A', 2): '20A 兩盒 $2,170',
     ('20A', 3): '20A 三盒 $3,200',
@@ -60,7 +67,7 @@ GIFTBOX_OPTIONS: Dict[Tuple[str, int], str] = {
     ('20A', 8): '20A 八盒 $8,440 (兩箱寄出)',
 }
 
-# 家庭號（一箱兩層 12 顆）：線性計價，單價 18A $1,850／20A $2,110
+# 家庭號 (family pack, two layers of 12 per case): linear pricing, unit price 18A $1,850 / 20A $2,110
 FAMILY_OPTIONS_CONFIRMED = True
 
 FAMILY_OPTIONS: Dict[Tuple[str, int], str] = {
@@ -72,9 +79,11 @@ FAMILY_OPTIONS: Dict[Tuple[str, int], str] = {
     ('20A', 3): '20A 3箱 $6,330',
 }
 
-# 「雙雙對對」：固定單價 $3,400/組，不分規格，寫入家庭號欄位（J 欄）。
-# 2026-09-05 新增：Google 表單尚未加上這個下拉選項，以下字串是提案格式，
-# 待表單實際加入選項後，要跟表單原文逐字核對（比照 FORM_OPTIONS_VERIFIED_ON 的做法）。
+# "雙雙對對": fixed price $3,400 per set (組), no size grade, written to the
+# 家庭號 (family pack) column (column J).
+# Added 2026-09-05: the Google Form does not have this dropdown option yet, so the
+# strings below are a proposed format. Once the option is actually added to the form,
+# verify them verbatim against the form text (same as FORM_OPTIONS_VERIFIED_ON).
 SHUANGSHUANG_OPTIONS: Dict[int, str] = {
     1: '雙雙對對 一組 $3,400',
     2: '雙雙對對 兩組 $6,800',
@@ -82,36 +91,37 @@ SHUANGSHUANG_OPTIONS: Dict[int, str] = {
     4: '雙雙對對 四組 $13,600',
 }
 
-# 表單提供到 8 盒 / 3 箱 / 4 組，超過的量沒有對應選項，需拆單
+# The form goes up to 8 boxes / 3 cases / 4 sets; larger quantities have no
+# matching option and must be split into multiple orders
 MAX_GIFTBOX_BOXES = max(boxes for _, boxes in GIFTBOX_OPTIONS)
 MAX_FAMILY_BOXES = max(boxes for _, boxes in FAMILY_OPTIONS)
 MAX_SHUANGSHUANG_SETS = max(SHUANGSHUANG_OPTIONS)
 
 
 def giftbox_option(spec: str, boxes: int) -> Optional[str]:
-    """把「規格 + 盒數」轉成禮盒欄位的選項字串，無對應選項時回傳 None"""
+    """Convert "size + box count" into a gift-box column option string; return None if no option matches"""
     return GIFTBOX_OPTIONS.get((_normalize_spec(spec), boxes))
 
 
 def family_option(spec: str, boxes: int) -> Optional[str]:
-    """把「規格 + 箱數」轉成家庭號欄位的選項字串，無對應選項時回傳 None"""
+    """Convert "size + case count" into a family-pack column option string; return None if no option matches"""
     return FAMILY_OPTIONS.get((_normalize_spec(spec), boxes))
 
 
 def shuangshuang_option(sets: int) -> Optional[str]:
-    """把「組數」轉成雙雙對對的選項字串（寫入家庭號欄位），無對應選項時回傳 None"""
+    """Convert a set count into a 雙雙對對 option string (written to the family-pack column); return None if no option matches"""
     return SHUANGSHUANG_OPTIONS.get(sets)
 
 
 def _normalize_spec(spec: str) -> str:
-    """統一規格寫法：`18 a`、`18a` 都轉成 `18A`"""
+    """Normalize the size spelling: `18 a` and `18a` both become `18A`"""
     if not spec:
         return ''
     return spec.replace(' ', '').upper()
 
 
 def describe_options() -> str:
-    """產生給 LLM 看的可選品項說明"""
+    """Build the description of available items shown to the LLM"""
     giftbox = '、'.join(
         f'{spec} {boxes}盒'
         for (spec, boxes) in sorted(GIFTBOX_OPTIONS)
@@ -124,7 +134,7 @@ def describe_options() -> str:
         f'{sets}組' for sets in sorted(SHUANGSHUANG_OPTIONS)
     )
     return (
-        f'精選禮盒（6顆/盒）：{giftbox}\n'
-        f'家庭號（12顆/箱）：{family}\n'
-        f'雙雙對對（固定組合，不分規格，寫入家庭號欄位）：{shuangshuang}'
+        f'精選禮盒 (gift box, 6 pieces per 盒): {giftbox}\n'
+        f'家庭號 (family pack, 12 pieces per 箱): {family}\n'
+        f'雙雙對對 (fixed set, no size grade, goes in the 家庭號 column): {shuangshuang}'
     )

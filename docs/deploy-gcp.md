@@ -1,22 +1,22 @@
-# 部署 Discord bot 到 GCE + GitHub Actions CI/CD
+# Deploying the Discord bot to GCE + GitHub Actions CI/CD
 
-`git push` 到 `master` 會自動：先跑 `pytest`，過了才 SSH 進 VM 拉最新程式碼、
-重啟 `discord-order-bot` 這個 systemd service。
+A `git push` to `master` automatically runs `pytest` first; only if it passes does it SSH into the VM, pull the latest code,
+and restart the `discord-order-bot` systemd service.
 
-對應的檔案：
+Related files:
 
-| 路徑 | 內容 |
+| Path | Contents |
 |---|---|
-| `.github/workflows/deploy.yml` | CI/CD workflow：test → deploy |
-| `deploy/discord-order-bot.service` | systemd unit 範本，要複製到 VM 上並替換使用者名稱 |
+| `.github/workflows/deploy.yml` | CI/CD workflow: test → deploy |
+| `deploy/discord-order-bot.service` | systemd unit template; copy it to the VM and replace the user name |
 
 ---
 
-## 一、VM 上的一次性設定
+## 1. One-time setup on the VM
 
-以下都在 VM 上執行（`gcloud compute ssh` 或直接在 Console 用瀏覽器 SSH）。
+Run all of the following on the VM (`gcloud compute ssh`, or browser SSH from the Console).
 
-**1. 安裝 uv 和 git**
+**1. Install uv and git**
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
@@ -24,7 +24,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 ```
 
-**2. clone 專案**
+**2. Clone the project**
 
 ```bash
 cd ~
@@ -33,84 +33,84 @@ cd LineOrderLLM
 uv sync
 ```
 
-**3. 放上 `.env` 和 Google 服務帳號 JSON**
+**3. Upload `.env` and the Google service account JSON**
 
-這兩個檔案 `.gitignore` 擋著不會進版控，要手動搬上去（用 `scp` 或直接在 VM 上貼）：
+`.gitignore` keeps these two files out of version control, so copy them up manually (with `scp`, or paste them directly on the VM):
 
 ```bash
 scp .env credentials.json your-vm-user@VM_EXTERNAL_IP:~/LineOrderLLM/
 ```
 
-`.env` 內容照 `DISCORD_SETUP.md` 的「三、設定 `.env`」那節填。
+Fill in `.env` following the "3. Configure `.env`" section of `DISCORD_SETUP.md`.
 
-**4. 裝 systemd service**
+**4. Install the systemd service**
 
 ```bash
 sudo cp ~/LineOrderLLM/deploy/discord-order-bot.service /etc/systemd/system/
-sudo nano /etc/systemd/system/discord-order-bot.service   # 把 YOUR_VM_USER 換成實際帳號
+sudo nano /etc/systemd/system/discord-order-bot.service   # Replace YOUR_VM_USER with the actual account
 sudo systemctl daemon-reload
 sudo systemctl enable --now discord-order-bot
-sudo journalctl -u discord-order-bot -f    # 確認正常啟動，Ctrl+C 離開
+sudo journalctl -u discord-order-bot -f    # Confirm it starts normally; Ctrl+C to exit
 ```
 
 ---
 
-## 二、讓 GitHub Actions 能 SSH 進 VM
+## 2. Letting GitHub Actions SSH into the VM
 
-**1. 產生一組專用的 deploy key（在自己電腦上，不要用你平常的私鑰）**
+**1. Generate a dedicated deploy key (on your own machine; don't use your everyday private key)**
 
 ```bash
 ssh-keygen -t ed25519 -f deploy_key -N "" -C "github-actions-deploy"
 ```
 
-會產生 `deploy_key`（私鑰）和 `deploy_key.pub`（公鑰）。
+This produces `deploy_key` (private key) and `deploy_key.pub` (public key).
 
-**2. 把公鑰加到 VM**
+**2. Add the public key to the VM**
 
-GCP Console → Compute Engine → 該 VM → Edit → **SSH Keys** → Add item，
-貼上 `deploy_key.pub` 的內容。GCP 會自動在 VM 上建對應的使用者帳號。
+GCP Console → Compute Engine → the VM → Edit → **SSH Keys** → Add item,
+and paste the contents of `deploy_key.pub`. GCP automatically creates the matching user account on the VM.
 
-（或者直接把公鑰內容 append 進 VM 上的 `~/.ssh/authorized_keys`，效果一樣。）
+(Alternatively, append the public key to `~/.ssh/authorized_keys` on the VM; same effect.)
 
-**3. 確認防火牆允許 SSH**
+**3. Make sure the firewall allows SSH**
 
-GCP 預設網路通常已經有 `default-allow-ssh`（允許 0.0.0.0/0 的 tcp:22）。
-沒有的話：VPC network → Firewall → Create firewall rule，允許 tcp:22。
-簡單版本靠 SSH key 擋人，不用額外限制來源 IP（GitHub Actions runner 的 IP 不固定）。
+The GCP default network usually already has `default-allow-ssh` (allows tcp:22 from 0.0.0.0/0).
+If not: VPC network → Firewall → Create firewall rule, allowing tcp:22.
+The simple setup relies on the SSH key to keep people out, with no source-IP restriction (GitHub Actions runner IPs aren't fixed).
 
-**4. 到 GitHub repo 設定 Secrets**
+**4. Configure Secrets in the GitHub repo**
 
-Settings → Secrets and variables → Actions → New repository secret，新增三個：
+Settings → Secrets and variables → Actions → New repository secret, and add three:
 
-| Secret 名稱 | 值 |
+| Secret name | Value |
 |---|---|
-| `GCP_VM_HOST` | VM 的外部 IP |
-| `GCP_VM_USER` | 步驟 2 裡 GCP 產生（或你自己設）的使用者名稱 |
-| `GCP_VM_SSH_KEY` | `deploy_key` 私鑰的完整內容 |
+| `GCP_VM_HOST` | The VM's external IP |
+| `GCP_VM_USER` | The user name GCP generated in step 2 (or one you set yourself) |
+| `GCP_VM_SSH_KEY` | The full contents of the `deploy_key` private key |
 
 ---
 
-## 三、測試
+## 3. Testing
 
-改一行程式碼、push 到 master，去 GitHub repo 的 **Actions** tab 看 workflow 有沒有跑過，
-`test` 過了才會進 `deploy`。VM 上跑：
+Change a line of code, push to master, and check the **Actions** tab of the GitHub repo to see whether the workflow ran;
+`deploy` only runs after `test` passes. On the VM run:
 
 ```bash
 sudo journalctl -u discord-order-bot -f
 ```
 
-確認重啟時間點跟 push 的時間對得上。
+Confirm the restart time matches the push time.
 
-## 疑難排解
+## Troubleshooting
 
 **`Permission denied (publickey)`**
-→ 公鑰沒加對，或 `GCP_VM_USER` 跟公鑰對應的使用者名稱不一致（GCP 用公鑰 comment
-的最後一段當使用者名稱，用 `ssh-keygen -C` 指定的那串）。
+→ The public key wasn't added correctly, or `GCP_VM_USER` doesn't match the user name tied to the public key (GCP uses the last part of the public key comment
+as the user name — the string you passed to `ssh-keygen -C`).
 
-**deploy 成功但 bot 沒重啟**
-→ 先確認 `GCP_VM_USER` 有 sudo 權限可以 `systemctl restart`，且不用密碼
-（GCP 建立的使用者預設在 sudoers，免密碼）。
+**Deploy succeeds but the bot doesn't restart**
+→ First confirm `GCP_VM_USER` has sudo rights to run `systemctl restart` without a password
+(users created by GCP are in sudoers by default, passwordless).
 
-**`git pull` 卡住問帳密**
-→ VM 上用 HTTPS clone 私有 repo才會這樣；這個 repo 是公開的話不會遇到，
-私有的話要改用 deploy key 或 `gh auth` 設定好認證。
+**`git pull` hangs asking for credentials**
+→ This only happens if the VM cloned a private repo over HTTPS; if this repo is public you won't hit it.
+If it's private, switch to a deploy key or set up authentication with `gh auth`.

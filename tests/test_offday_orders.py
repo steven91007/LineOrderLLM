@@ -1,7 +1,8 @@
-"""非出貨日稽核的單元測試
+"""Unit tests for the non-shipping-day audit.
 
-不連 Google，直接把假的總表資料餵給 OffdayOrderAuditor.audit——
-用一個假的 client 換掉真的 FormSheetClient，這樣連憑證都不用。
+No Google connection: fake master-sheet data is fed straight into
+OffdayOrderAuditor.audit -- a fake client replaces the real FormSheetClient,
+so no credentials are needed.
 """
 
 from datetime import date, timedelta
@@ -23,19 +24,19 @@ HEADER = list(FORM_COLUMNS)
 
 def make_row(shipping_date: str, receiver: str = '王小明',
              phone: str = '0912345678', giftbox: str = '20A 一盒 $1,150') -> list:
-    """造一列總表資料（12 欄，順序同 FORM_COLUMNS）"""
+    """Build one master-sheet row (12 columns, in FORM_COLUMNS order)."""
     row = [''] * len(FORM_COLUMNS)
-    row[0] = '2026/08/21 10:00:00'   # 時間戳記
-    row[1] = '陳小姐'                 # 訂購人
-    row[5] = receiver                # 收件人
-    row[6] = phone                   # 收件人電話
-    row[8] = giftbox                 # 禮盒
-    row[11] = shipping_date          # 欲配送日期
+    row[0] = '2026/08/21 10:00:00'   # Timestamp
+    row[1] = '陳小姐'                 # Orderer
+    row[5] = receiver                # Receiver
+    row[6] = phone                   # Receiver phone
+    row[8] = giftbox                 # Gift box
+    row[11] = shipping_date          # Desired delivery date
     return row
 
 
 def make_auditor(rows):
-    """繞過 FormSheetClient，直接塞資料進去"""
+    """Bypass FormSheetClient and inject the data directly."""
     auditor = OffdayOrderAuditor.__new__(OffdayOrderAuditor)
 
     class _FakeClient:
@@ -50,15 +51,15 @@ def make_auditor(rows):
     return auditor
 
 
-# ─────────────────────── 出貨日定義 ───────────────────────
+# ─────────────────────── Shipping day definition ───────────────────────
 
 
 def test_shipping_days_are_wednesday_and_sunday():
-    """CONTEXT.md：只有週三與週日是出貨日"""
+    """CONTEXT.md: only Wednesday and Sunday are shipping days."""
     assert SHIPPING_WEEKDAYS == {2, 6}
-    assert is_shipping_day(date(2026, 8, 26))   # 週三
-    assert is_shipping_day(date(2026, 8, 23))   # 週日
-    assert not is_shipping_day(date(2026, 8, 25))  # 週二
+    assert is_shipping_day(date(2026, 8, 26))   # Wednesday
+    assert is_shipping_day(date(2026, 8, 23))   # Sunday
+    assert not is_shipping_day(date(2026, 8, 25))  # Tuesday
     assert shipping_days_text() == '週三、週日'
 
 
@@ -68,18 +69,18 @@ def test_weekday_name():
 
 
 def test_chat_log_importer_uses_the_shared_definition():
-    """解析和稽核必須共用同一份出貨日定義，不能各寫一份"""
+    """Parsing and auditing must share one shipping-day definition, not each keep their own."""
     import src.services.chat_log_importer as importer
     assert importer.is_shipping_day is is_shipping_day
 
 
-# ─────────────────────── 掃描邏輯 ───────────────────────
+# ─────────────────────── Scanning logic ───────────────────────
 
 
 def test_shipping_days_are_not_reported():
     auditor = make_auditor([
-        make_row('2026/8/26'),   # 週三
-        make_row('2026/8/23'),   # 週日
+        make_row('2026/8/26'),   # Wednesday
+        make_row('2026/8/23'),   # Sunday
     ])
     result = auditor.audit(include_past=True)
     assert result['success']
@@ -90,10 +91,10 @@ def test_shipping_days_are_not_reported():
 
 def test_offday_orders_are_grouped_by_date():
     auditor = make_auditor([
-        make_row('2026/8/25', receiver='王小明'),   # 週二
-        make_row('2026/8/28', receiver='李小華'),   # 週五
-        make_row('2026/8/28', receiver='張先生'),   # 週五
-        make_row('2026/8/26', receiver='沒問題'),   # 週三，不該出現
+        make_row('2026/8/25', receiver='王小明'),   # Tuesday
+        make_row('2026/8/28', receiver='李小華'),   # Friday
+        make_row('2026/8/28', receiver='張先生'),   # Friday
+        make_row('2026/8/26', receiver='沒問題'),   # Wednesday, shouldn't appear
     ])
     result = auditor.audit(include_past=True)
     assert result['offday_count'] == 3
@@ -116,7 +117,7 @@ def test_blank_and_garbled_dates_go_to_unknown():
 
 
 def test_date_with_weekday_annotation_is_parsed():
-    """「2026/8/25(星期二)」這種帶註記的寫法要看得懂，不能算成無法辨識"""
+    """Annotated forms like 「2026/8/25(星期二)」 must be understood, not counted as unrecognized."""
     auditor = make_auditor([make_row('2026/8/25(星期二)')])
     result = auditor.audit(include_past=True)
     assert result['unknown_count'] == 0
@@ -145,17 +146,17 @@ def test_include_past_lists_everything():
 
 
 def test_unknown_dates_are_never_skipped_as_past():
-    """日期看不懂就無從判斷過去未來，一律要列出來"""
+    """An unreadable date can't be judged past or future, so it must always be listed."""
     auditor = make_auditor([make_row('', receiver='沒填')])
     result = auditor.audit(include_past=False, today=date(2026, 8, 21))
     assert result['unknown_count'] == 1
 
 
 def test_row_numbers_point_at_the_real_sheet_row():
-    """第 1 列是標題，所以第一筆資料是第 2 列"""
+    """Row 1 is the header, so the first data row is row 2."""
     auditor = make_auditor([
-        make_row('2026/8/26'),   # 第 2 列，正常
-        make_row('2026/8/25'),   # 第 3 列，週二
+        make_row('2026/8/26'),   # Row 2, normal
+        make_row('2026/8/25'),   # Row 3, Tuesday
     ])
     result = auditor.audit(include_past=True)
     assert result['offday']['2026-08-25'][0].row_number == 3
@@ -178,7 +179,7 @@ def test_empty_sheet():
     assert result['message'] == '總表沒有訂單資料'
 
 
-# ─────────────────────── Discord 呈現 ───────────────────────
+# ─────────────────────── Discord rendering ───────────────────────
 
 
 def test_embed_when_everything_is_fine():
@@ -206,9 +207,9 @@ def test_embed_mentions_skipped_past_orders():
 
 
 def test_embed_falls_back_to_attachment_when_too_many_dates():
-    """日期一多就會撞 25 field 上限，要退回附件
+    """With many dates we hit the 25-field limit and must fall back to an attachment.
 
-    一個月大約只有 20 個非出貨日，湊不到上限，所以要跨到兩個月。
+    A month has only about 20 non-shipping days, not enough to hit the limit, so span two months.
     """
     start = date(2026, 9, 1)
     days = [start + timedelta(days=i) for i in range(60)]
@@ -237,7 +238,7 @@ if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
 
 
-# ─────────────────────── 出貨日早於填表時間 ───────────────────────
+# ─────────────────────── Shipping date earlier than submission time ───────────────────────
 
 
 def make_row_with_timestamp(shipping_date: str, submitted: str,
@@ -248,7 +249,7 @@ def make_row_with_timestamp(shipping_date: str, submitted: str,
 
 
 def test_backdated_order_is_flagged():
-    """填表當下出貨日就已經過去了，一定是填錯"""
+    """The shipping date had already passed when the form was filled, so it must be wrong."""
     auditor = make_auditor([
         make_row_with_timestamp('2026/8/16', '2026/08/20 10:00:00', receiver='填錯的'),
     ])
@@ -268,7 +269,7 @@ def test_normal_order_is_not_backdated():
 
 
 def test_same_day_shipping_is_not_backdated():
-    """當天下單當天出貨不算填錯"""
+    """Ordering and shipping on the same day is not an error."""
     auditor = make_auditor([
         make_row_with_timestamp('2026/8/26', '2026/08/26 08:00:00'),
     ])
@@ -276,7 +277,7 @@ def test_same_day_shipping_is_not_backdated():
 
 
 def test_backdated_ignores_include_past_filter():
-    """backdated 必然早於今天，被 include_past 濾掉的話預設就永遠看不到"""
+    """Backdated rows are necessarily before today; if include_past filtered them, they'd never be seen by default."""
     auditor = make_auditor([
         make_row_with_timestamp('2026/8/16', '2026/08/20 10:00:00'),
     ])
@@ -285,9 +286,9 @@ def test_backdated_ignores_include_past_filter():
 
 
 def test_backdated_and_offday_can_both_apply():
-    """同一列可能兩種毛病都有，兩邊都要出現"""
+    """One row may have both problems; it must appear in both."""
     auditor = make_auditor([
-        make_row_with_timestamp('2026/8/18', '2026/08/20 10:00:00'),   # 週二 且 早於填表
+        make_row_with_timestamp('2026/8/18', '2026/08/20 10:00:00'),   # Tuesday and earlier than submission
     ])
     result = auditor.audit(include_past=True)
     assert result['backdated_count'] == 1
@@ -295,7 +296,7 @@ def test_backdated_and_offday_can_both_apply():
 
 
 def test_unparseable_timestamp_skips_the_check():
-    """時間戳記看不懂就不做比對，不能誤報"""
+    """If the timestamp is unreadable, skip the comparison; no false positives."""
     auditor = make_auditor([
         make_row_with_timestamp('2026/8/16', '亂寫的時間'),
     ])
@@ -313,7 +314,7 @@ def test_backdated_appears_in_embed_and_text():
 
 
 def test_clean_sheet_reports_no_problems():
-    """三類都沒有才算乾淨"""
+    """Only clean when none of the three categories apply."""
     auditor = make_auditor([
         make_row_with_timestamp('2026/8/26', '2026/08/20 10:00:00'),
     ])

@@ -1,5 +1,5 @@
 """
-訂單驗證模組
+Order validation module.
 """
 import json
 from typing import Dict, Any, List
@@ -8,7 +8,11 @@ from ..order_schemas import SINGLE_ORDER_SCHEMA, MULTI_ORDER_SCHEMA, ERROR_SCHEM
 
 
 class OrderValidator:
-    """訂單資料驗證器"""
+    """Order data validator.
+
+    Note: the Chinese error_message strings are kept as-is because they are
+    relayed to customers in LINE replies.
+    """
     
     def __init__(self):
         self.schemas = {
@@ -19,13 +23,13 @@ class OrderValidator:
     
     def validate_order_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        驗證訂單資料是否符合 Schema
+        Validate that the order data conforms to the schema
         
         Args:
-            data: 訂單資料字典
+            data: order data dict
             
         Returns:
-            Dict: 包含驗證結果的字典
+            Dict: dict with the validation result
         """
         if not isinstance(data, dict):
             return {
@@ -50,10 +54,10 @@ class OrderValidator:
             }
         
         try:
-            # 使用對應的 Schema 進行驗證
+            # Validate against the matching schema
             validate(instance=data, schema=self.schemas[order_type])
             
-            # 通過基本 Schema 驗證，進行業務邏輯驗證
+            # Basic schema validation passed; now check business rules
             business_validation = self._validate_business_rules(data)
             if not business_validation['is_valid']:
                 return business_validation
@@ -73,13 +77,13 @@ class OrderValidator:
     
     def _validate_business_rules(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        驗證業務邏輯規則
+        Validate business rules
         
         Args:
-            data: 訂單資料
+            data: order data
             
         Returns:
-            Dict: 驗證結果
+            Dict: validation result
         """
         order_type = data['order_type']
         
@@ -88,13 +92,13 @@ class OrderValidator:
         elif order_type == 'multiple':
             return self._validate_multi_order_rules(data)
         else:
-            return {'is_valid': True}  # error 類型不需要業務驗證
+            return {'is_valid': True}  # the error type needs no business validation
     
     def _validate_single_order_rules(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證單一訂單的業務規則"""
+        """Validate business rules for a single order"""
         errors = []
         
-        # 驗證電話號碼格式
+        # Validate phone number format
         if data.get('receiver_phone'):
             if not self._is_valid_phone(data['receiver_phone']):
                 errors.append('收件人電話格式無效')
@@ -103,7 +107,7 @@ class OrderValidator:
             if not self._is_valid_phone(data['sender_phone']):
                 errors.append('寄件人電話格式無效')
         
-        # 驗證商品清單
+        # Validate the item list
         items = data.get('items', [])
         if not items:
             errors.append('商品清單不能為空')
@@ -114,7 +118,7 @@ class OrderValidator:
                 if item.get('quantity', 0) <= 0:
                     errors.append(f'商品 {i+1} 數量必須大於 0')
         
-        # 驗證地址
+        # Validate the address
         if not data.get('shipping_address') or len(str(data['shipping_address']).strip()) < 5:
             errors.append('收件地址太短，至少需要 5 個字符')
         
@@ -128,11 +132,11 @@ class OrderValidator:
         return {'is_valid': True}
     
     def _validate_multi_order_rules(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """驗證多訂單的業務規則"""
+        """Validate business rules for multiple orders"""
         orders = data.get('orders', [])
         total_orders = data.get('total_orders', 0)
         
-        # 驗證訂單數量一致性
+        # Check the order count is consistent
         if len(orders) != total_orders:
             return {
                 'is_valid': False,
@@ -140,10 +144,10 @@ class OrderValidator:
                 'error_message': f'訂單數量不一致：宣告 {total_orders} 份，實際 {len(orders)} 份'
             }
         
-        # 驗證每份訂單
+        # Validate each order
         invalid_orders = []
         for i, order in enumerate(orders, 1):
-            # 為每份訂單添加 order_type 以便驗證
+            # Add order_type to each order so it can be validated
             order_copy = order.copy()
             order_copy['order_type'] = 'single'
             
@@ -167,32 +171,32 @@ class OrderValidator:
     
     def _is_valid_phone(self, phone: str) -> bool:
         """
-        驗證電話號碼格式
+        Validate phone number format
         
         Args:
-            phone: 電話號碼字串
+            phone: phone number string
             
         Returns:
-            bool: 是否為有效格式
+            bool: whether the format is valid
         """
         if not phone or not isinstance(phone, str):
             return False
         
-        # 移除空格和特殊字符進行基本驗證
+        # Strip spaces and special characters for a basic check
         cleaned_phone = ''.join(char for char in phone if char.isdigit() or char in '+-()')
         
-        # 基本長度檢查
+        # Basic length check
         digit_count = sum(1 for char in cleaned_phone if char.isdigit())
         
-        return 8 <= digit_count <= 15  # 國際電話號碼長度範圍
+        return 8 <= digit_count <= 15  # length range of international phone numbers
 
 
 class JSONValidator:
-    """JSON 格式驗證器"""
+    """JSON format validator"""
     
     @staticmethod
     def is_valid_json(json_string: str) -> bool:
-        """檢查字串是否為有效的 JSON"""
+        """Check whether a string is valid JSON"""
         try:
             json.loads(json_string)
             return True
@@ -201,7 +205,7 @@ class JSONValidator:
     
     @staticmethod
     def parse_json_safely(json_string: str) -> Dict[str, Any]:
-        """安全地解析 JSON，失敗時返回錯誤格式"""
+        """Parse JSON safely; on failure return the error format"""
         try:
             return json.loads(json_string)
         except (json.JSONDecodeError, TypeError) as e:
@@ -212,11 +216,11 @@ class JSONValidator:
     
     @staticmethod
     def fix_common_json_issues(json_string: str) -> str:
-        """修正常見的 JSON 格式問題"""
+        """Fix common JSON formatting problems"""
         if not isinstance(json_string, str):
             return json_string
         
-        # 移除可能的 markdown 代碼塊標記
+        # Remove any markdown code-block markers
         json_string = json_string.strip()
         if json_string.startswith('```json'):
             json_string = json_string[7:]
@@ -225,10 +229,10 @@ class JSONValidator:
         if json_string.endswith('```'):
             json_string = json_string[:-3]
         
-        # 移除前後空白
+        # Strip surrounding whitespace
         json_string = json_string.strip()
         
-        # 嘗試修正單引號為雙引號
+        # Try to turn single quotes into double quotes
         json_string = json_string.replace("'", '"')
         
         return json_string

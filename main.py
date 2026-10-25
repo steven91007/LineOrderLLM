@@ -16,10 +16,10 @@ from linebot.v3.webhooks import (
     PostbackEvent
 )
 
-# 載入環境變數
+# Load environment variables
 load_dotenv()
 
-# 匯入自定義模組
+# Import project modules
 from config import (
     LINE_CHANNEL_ACCESS_TOKEN,
     LINE_CHANNEL_SECRET,
@@ -40,7 +40,7 @@ app = Flask(__name__)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# 初始化訂單處理器
+# Initialize the order handler
 order_handler = OrderHandler(
     configuration, 
     AUTHORIZED_USERS,
@@ -79,13 +79,13 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    # 使用訂單處理器處理訊息
+    # Let the order handler process the message
     order_handler.handle_text_message(event)
 
 
 @handler.add(PostbackEvent)
 def handle_postback(event):
-    # 處理按鈕回應
+    # Handle button (postback) responses
     order_handler.handle_postback(event)
 
 if __name__ == "__main__":

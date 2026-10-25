@@ -13,27 +13,27 @@ logger = logging.getLogger(__name__)
 
 class GoogleSheetsClient:
     def __init__(self, credentials_path: str, sheet_id: str, auto_organize_by_date: bool = True):
-        """初始化 Google Sheets 客戶端"""
+        """Initialize the Google Sheets client."""
         self.sheet_id = sheet_id
         self.credentials_path = credentials_path
         self.auto_organize_by_date = auto_organize_by_date
         self.service = self._build_service()
-        self.sheet_cache = {}  # 快取已存在的 sheet 資訊
-        self.price_calculator = PriceCalculator()  # 價格計算器
+        self.sheet_cache = {}  # Cache of known existing sheet info
+        self.price_calculator = PriceCalculator()  # Price calculator
     
     def _build_service(self):
-        """建立 Google Sheets API 服務"""
+        """Build the Google Sheets API service."""
         try:
-            # 設定權限範圍
+            # Set the permission scopes
             SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
             
-            # 載入服務帳戶憑證
+            # Load the service account credentials
             credentials = Credentials.from_service_account_file(
                 self.credentials_path, 
                 scopes=SCOPES
             )
             
-            # 建立服務
+            # Build the service
             service = build('sheets', 'v4', credentials=credentials)
             return service
         except Exception as e:
@@ -41,7 +41,7 @@ class GoogleSheetsClient:
             return None
     
     def _get_sheet_title(self) -> str:
-        """獲取第一個工作表的名稱"""
+        """Get the name of the first worksheet."""
         try:
             spreadsheet = self.service.spreadsheets().get(
                 spreadsheetId=self.sheet_id
@@ -56,7 +56,7 @@ class GoogleSheetsClient:
             return 'Sheet1'
     
     def _get_all_sheets(self) -> List[Dict[str, Any]]:
-        """獲取所有工作表資訊"""
+        """Get info for all worksheets."""
         try:
             spreadsheet = self.service.spreadsheets().get(
                 spreadsheetId=self.sheet_id
@@ -68,7 +68,7 @@ class GoogleSheetsClient:
             return []
     
     def _get_sheet_by_name(self, sheet_name: str) -> Optional[Dict[str, Any]]:
-        """根據名稱獲取工作表資訊"""
+        """Get worksheet info by name."""
         sheets = self._get_all_sheets()
         for sheet in sheets:
             if sheet.get('properties', {}).get('title') == sheet_name:
@@ -76,19 +76,19 @@ class GoogleSheetsClient:
         return None
     
     def _create_sheet_by_date(self, shipping_date: datetime) -> str:
-        """根據出貨日期創建新的工作表"""
+        """Create a new worksheet for the given shipping date."""
         if not self.service:
             return 'Sheet1'
         
-        # 生成工作表名稱：YYYYMMDD_星期X
+        # Build the sheet name: YYYYMMDD_星期X (weekday)
         sheet_name = time_utils.format_date_with_weekday(shipping_date, 'sheet_name')
         
-        # 檢查是否已存在
+        # Check whether it already exists
         if self._get_sheet_by_name(sheet_name):
             return sheet_name
         
         try:
-            # 創建新工作表
+            # Create the new worksheet
             request = {
                 'requests': [{
                     'addSheet': {
@@ -104,7 +104,7 @@ class GoogleSheetsClient:
                 body=request
             ).execute()
             
-            # 為新工作表設置標題
+            # Set up the header row on the new worksheet
             self._setup_sheet_headers(sheet_name)
             
             logger.info(f"Created new sheet: {sheet_name}")
@@ -112,16 +112,17 @@ class GoogleSheetsClient:
             
         except Exception as e:
             logger.error(f"Error creating sheet {sheet_name}: {e}")
-            return self._get_sheet_title()  # 返回默認工作表
+            return self._get_sheet_title()  # Fall back to the default worksheet
     
     def _setup_sheet_headers(self, sheet_name: str) -> bool:
-        """為指定工作表設置標題行"""
+        """Set up the header row on the given worksheet."""
         if not self.service:
             return False
         
         try:
-            # 設置標題
+            # Set the headers
             headers = [[
+                # Column headers (functional, keep as-is)
                 '訂購/寄件人',
                 '收件人',
                 '品項',
@@ -146,7 +147,7 @@ class GoogleSheetsClient:
                 body=body
             ).execute()
             
-            # 設定標題行格式（粗體）
+            # Format the header row (bold)
             sheet_info = self._get_sheet_by_name(sheet_name)
             if sheet_info:
                 sheet_id = sheet_info.get('properties', {}).get('sheetId', 0)
@@ -190,28 +191,28 @@ class GoogleSheetsClient:
             return False
     
     def _determine_target_sheet(self, order_data: Dict[str, Any]) -> str:
-        """決定訂單應該寫入哪個工作表"""
+        """Decide which worksheet the order should be written to."""
         if not self.auto_organize_by_date:
             return self._get_sheet_title()
         
-        # 解析出貨日期
+        # Parse the shipping date
         shipping_date_str = order_data.get('shipping_date', '')
         if not shipping_date_str:
-            # 沒有指定出貨日期，使用當天
+            # No shipping date given; use today
             current_time = time_utils.get_current_time()
             return self._create_sheet_by_date(current_time)
         
-        # 解析出貨日期
+        # Parse the shipping date
         shipping_date = time_utils.parse_shipping_date(shipping_date_str)
         if shipping_date:
             return self._create_sheet_by_date(shipping_date)
         else:
-            # 解析失敗，使用默認工作表
+            # Parsing failed; use the default worksheet
             logger.warning(f"Failed to parse shipping date: {shipping_date_str}")
             return self._get_sheet_title()
     
     def append_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
-        """將訂單資料添加到試算表（支援單一訂單和多訂單，按日期自動分組）"""
+        """Append order data to the spreadsheet (supports single and multiple orders, auto-grouped by date)."""
         if not self.service:
             return {
                 'success': False,
@@ -219,10 +220,10 @@ class GoogleSheetsClient:
             }
         
         try:
-            # 決定目標工作表
+            # Decide the target worksheet
             target_sheet = self._determine_target_sheet(order_data)
             
-            # 格式化出貨日期（包含星期）
+            # Format the shipping date (including weekday)
             shipping_date_str = order_data.get('shipping_date', '')
             formatted_shipping_date = ''
             
@@ -233,24 +234,24 @@ class GoogleSheetsClient:
                 else:
                     formatted_shipping_date = shipping_date_str
             
-            # 準備要寫入的資料
+            # Prepare the data to write
             values = [[
-                order_data.get('sender_name', ''),  # 訂購/寄件人
-                order_data.get('receiver_name', ''),  # 收件人
-                self._format_items_name_only(order_data.get('items', [])),  # 品項
-                self._format_items_quantity_only(order_data.get('items', [])),  # 數量
-                order_data.get('sender_phone', ''),  # 訂購人電話
-                order_data.get('receiver_phone', ''),  # 收件人電話
-                order_data.get('shipping_address', ''),  # 地址
-                self._calculate_total_price(order_data.get('items', [])),  # 總價
-                order_data.get('payment_status', ''),  # 付款狀況
-                order_data.get('last_5_digits', '')  # 末5碼
+                order_data.get('sender_name', ''),  # Orderer/sender
+                order_data.get('receiver_name', ''),  # Receiver
+                self._format_items_name_only(order_data.get('items', [])),  # Items
+                self._format_items_quantity_only(order_data.get('items', [])),  # Quantity
+                order_data.get('sender_phone', ''),  # Orderer phone
+                order_data.get('receiver_phone', ''),  # Receiver phone
+                order_data.get('shipping_address', ''),  # Address
+                self._calculate_total_price(order_data.get('items', [])),  # Total price
+                order_data.get('payment_status', ''),  # Payment status
+                order_data.get('last_5_digits', '')  # Last 5 digits
             ]]
             
-            # 指定寫入範圍（A:J 表示從 A 欄到 J 欄）
+            # Target range (A:J means columns A through J)
             range_name = f'{target_sheet}!A:J'
             
-            # 執行寫入操作
+            # Perform the write
             body = {
                 'values': values,
                 'majorDimension': 'ROWS',
@@ -283,7 +284,7 @@ class GoogleSheetsClient:
             }
     
     def _format_items(self, items: List[Dict[str, Any]]) -> str:
-        """格式化商品項目為字串"""
+        """Format the items as a string."""
         if not items:
             return ''
         
@@ -296,7 +297,7 @@ class GoogleSheetsClient:
         return ', '.join(formatted_items)
     
     def _format_items_name_only(self, items: List[Dict[str, Any]]) -> str:
-        """格式化商品名稱（僅名稱，不含數量）"""
+        """Format the item names (names only, no quantities)."""
         if not items:
             return ''
         
@@ -309,7 +310,7 @@ class GoogleSheetsClient:
         return ', '.join(names)
     
     def _format_items_quantity_only(self, items: List[Dict[str, Any]]) -> str:
-        """格式化商品數量（僅數量）"""
+        """Format the item quantities (quantities only)."""
         if not items:
             return ''
         
@@ -321,7 +322,7 @@ class GoogleSheetsClient:
         return ', '.join(quantities)
     
     def _calculate_total_price(self, items: List[Dict[str, Any]]) -> str:
-        """計算商品總價（使用價格計算器）"""
+        """Calculate the total price of the items (using the price calculator)."""
         if not items:
             return '0'
         
@@ -330,10 +331,10 @@ class GoogleSheetsClient:
             return str(total_price)
         except Exception as e:
             logger.error(f"Error calculating price: {e}")
-            return '計算錯誤'
+            return '計算錯誤'  # cell value written to the sheet ("calculation error")
     
     def append_multiple_orders(self, orders_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """批量添加多份訂單到試算表（按日期自動分組到不同 sheet）"""
+        """Batch-append multiple orders to the spreadsheet (auto-grouped by date into separate sheets)."""
         if not self.service:
             return {
                 'success': False,
@@ -348,24 +349,24 @@ class GoogleSheetsClient:
                 'total_processed': 0
             }
         
-        # 如果不自動分組，使用原來的批量處理方式
+        # If not auto-grouping, use the original batch approach
         if not self.auto_organize_by_date:
             return self._append_multiple_orders_to_single_sheet(orders_data)
         
-        # 按日期分組訂單
+        # Group orders by date
         try:
             grouped_orders = {}
             order_ids = []
             current_time = time_utils.get_current_time()
             
             for order_data in orders_data:
-                # 決定目標工作表
+                # Decide the target worksheet
                 target_sheet = self._determine_target_sheet(order_data)
                 
                 if target_sheet not in grouped_orders:
                     grouped_orders[target_sheet] = []
                 
-                # 格式化出貨日期（包含星期）
+                # Format the shipping date (including weekday)
                 shipping_date_str = order_data.get('shipping_date', '')
                 formatted_shipping_date = ''
                 
@@ -376,24 +377,24 @@ class GoogleSheetsClient:
                     else:
                         formatted_shipping_date = shipping_date_str
                 
-                # 準備該訂單的資料行
+                # Prepare this order's data row
                 row = [
-                    order_data.get('sender_name', ''),  # 訂購/寄件人
-                    order_data.get('receiver_name', ''),  # 收件人
-                    self._format_items_name_only(order_data.get('items', [])),  # 品項
-                    self._format_items_quantity_only(order_data.get('items', [])),  # 數量
-                    order_data.get('sender_phone', ''),  # 訂購人電話
-                    order_data.get('receiver_phone', ''),  # 收件人電話
-                    order_data.get('shipping_address', ''),  # 地址
-                    self._calculate_total_price(order_data.get('items', [])),  # 總價
-                    order_data.get('payment_status', ''),  # 付款狀況
-                    order_data.get('last_5_digits', '')  # 末5碼
+                    order_data.get('sender_name', ''),  # Orderer/sender
+                    order_data.get('receiver_name', ''),  # Receiver
+                    self._format_items_name_only(order_data.get('items', [])),  # Items
+                    self._format_items_quantity_only(order_data.get('items', [])),  # Quantity
+                    order_data.get('sender_phone', ''),  # Orderer phone
+                    order_data.get('receiver_phone', ''),  # Receiver phone
+                    order_data.get('shipping_address', ''),  # Address
+                    self._calculate_total_price(order_data.get('items', [])),  # Total price
+                    order_data.get('payment_status', ''),  # Payment status
+                    order_data.get('last_5_digits', '')  # Last 5 digits
                 ]
                 
                 grouped_orders[target_sheet].append(row)
                 order_ids.append(order_data.get('order_id', ''))
             
-            # 批量寫入各個工作表
+            # Batch-write to each worksheet
             total_processed = 0
             sheet_results = {}
             
@@ -442,15 +443,15 @@ class GoogleSheetsClient:
             }
     
     def _append_multiple_orders_to_single_sheet(self, orders_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """批量添加多份訂單到單一試算表（不按日期分組）"""
+        """Batch-append multiple orders to a single sheet (no date grouping)."""
         try:
-            # 準備批量資料
+            # Prepare the batch data
             values = []
             order_ids = []
             current_time = time_utils.get_current_time()
             
             for order_data in orders_data:
-                # 格式化出貨日期（包含星期）
+                # Format the shipping date (including weekday)
                 shipping_date_str = order_data.get('shipping_date', '')
                 formatted_shipping_date = ''
                 
@@ -462,25 +463,25 @@ class GoogleSheetsClient:
                         formatted_shipping_date = shipping_date_str
                 
                 row = [
-                    order_data.get('sender_name', ''),  # 訂購/寄件人
-                    order_data.get('receiver_name', ''),  # 收件人
-                    self._format_items_name_only(order_data.get('items', [])),  # 品項
-                    self._format_items_quantity_only(order_data.get('items', [])),  # 數量
-                    order_data.get('sender_phone', ''),  # 訂購人電話
-                    order_data.get('receiver_phone', ''),  # 收件人電話
-                    order_data.get('shipping_address', ''),  # 地址
-                    self._calculate_total_price(order_data.get('items', [])),  # 總價
-                    order_data.get('payment_status', ''),  # 付款狀況
-                    order_data.get('last_5_digits', '')  # 末5碼
+                    order_data.get('sender_name', ''),  # Orderer/sender
+                    order_data.get('receiver_name', ''),  # Receiver
+                    self._format_items_name_only(order_data.get('items', [])),  # Items
+                    self._format_items_quantity_only(order_data.get('items', [])),  # Quantity
+                    order_data.get('sender_phone', ''),  # Orderer phone
+                    order_data.get('receiver_phone', ''),  # Receiver phone
+                    order_data.get('shipping_address', ''),  # Address
+                    self._calculate_total_price(order_data.get('items', [])),  # Total price
+                    order_data.get('payment_status', ''),  # Payment status
+                    order_data.get('last_5_digits', '')  # Last 5 digits
                 ]
                 values.append(row)
                 order_ids.append(order_data.get('order_id', ''))
             
-            # 指定寫入範圍（A:K 表示從 A 欄到 K 欄）
+            # Target range (A:K means columns A through K)
             sheet_title = self._get_sheet_title()
             range_name = f'{sheet_title}!A:K'
             
-            # 執行批量寫入操作
+            # Perform the batch write
             body = {
                 'values': values,
                 'majorDimension': 'ROWS',
@@ -517,12 +518,12 @@ class GoogleSheetsClient:
             }
     
     def create_sheet_if_not_exists(self) -> bool:
-        """確保試算表存在並有正確的標題"""
+        """Ensure the spreadsheet exists and has the correct headers."""
         if not self.service:
             return False
         
         try:
-            # 先獲取工作表資訊
+            # Get the worksheet info first
             spreadsheet = self.service.spreadsheets().get(
                 spreadsheetId=self.sheet_id
             ).execute()
@@ -533,7 +534,7 @@ class GoogleSheetsClient:
             else:
                 sheet_title = 'Sheet1'
             
-            # 檢查第一行是否有標題
+            # Check whether the first row has headers
             range_name = f'{sheet_title}!A1:K1'
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
@@ -542,7 +543,7 @@ class GoogleSheetsClient:
             
             values = result.get('values', [])
             
-            # 如果沒有標題，則添加
+            # Add headers if missing
             if not values:
                 headers = [[
                     '訂購/寄件人',
@@ -570,7 +571,7 @@ class GoogleSheetsClient:
                     body=body
                 ).execute()
                 
-                # 設定標題行格式（粗體）
+                # Format the header row (bold)
                 requests = [{
                     'repeatCell': {
                         'range': {
@@ -607,7 +608,7 @@ class GoogleSheetsClient:
             return False
     
     def get_recent_orders(self, limit: int = 10) -> Dict[str, Any]:
-        """獲取最近的訂單記錄"""
+        """Get the most recent order records."""
         if not self.service:
             return {
                 'success': False,
@@ -616,7 +617,7 @@ class GoogleSheetsClient:
             }
         
         try:
-            # 獲取所有資料
+            # Fetch all data
             sheet_title = self._get_sheet_title()
             range_name = f'{sheet_title}!A:K'
             result = self.service.spreadsheets().values().get(
@@ -632,28 +633,28 @@ class GoogleSheetsClient:
                     'orders': []
                 }
             
-            # 跳過標題行，取最後 N 筆資料
+            # Skip the header row and take the last N rows
             orders = []
             data_rows = values[1:] if len(values) > 1 else []
             recent_rows = data_rows[-limit:] if len(data_rows) > limit else data_rows
             
             for row in recent_rows:
-                # 確保每行有足夠的欄位
+                # Make sure each row has enough columns
                 while len(row) < 11:
                     row.append('')
                 
                 orders.append({
-                    'sender_name': row[0],     # 訂購/寄件人
-                    'sender_address': row[1],  # 寄件地址
-                    'receiver_name': row[2],   # 收件人
-                    'items_name': row[3],      # 品項
-                    'items_quantity': row[4],  # 數量
-                    'sender_phone': row[5],    # 訂購人電話
-                    'receiver_phone': row[6],  # 收件人電話
-                    'shipping_address': row[7], # 地址
-                    'total_price': row[8],     # 總價
-                    'payment_status': row[9],  # 付款狀況
-                    'last_5_digits': row[10]   # 末5碼
+                    'sender_name': row[0],     # Orderer/sender
+                    'sender_address': row[1],  # Sender address
+                    'receiver_name': row[2],   # Receiver
+                    'items_name': row[3],      # Items
+                    'items_quantity': row[4],  # Quantity
+                    'sender_phone': row[5],    # Orderer phone
+                    'receiver_phone': row[6],  # Receiver phone
+                    'shipping_address': row[7], # Address
+                    'total_price': row[8],     # Total price
+                    'payment_status': row[9],  # Payment status
+                    'last_5_digits': row[10]   # Last 5 digits
                 })
             
             return {
@@ -669,7 +670,7 @@ class GoogleSheetsClient:
             }
     
     def test_connection(self) -> Dict[str, Any]:
-        """測試 Google Sheets 連接"""
+        """Test the Google Sheets connection."""
         if not self.service:
             return {
                 'success': False,
@@ -678,7 +679,7 @@ class GoogleSheetsClient:
             }
         
         try:
-            # 嘗試讀取試算表的基本資訊
+            # Try reading the spreadsheet's basic info
             spreadsheet = self.service.spreadsheets().get(
                 spreadsheetId=self.sheet_id
             ).execute()
@@ -686,8 +687,8 @@ class GoogleSheetsClient:
             title = spreadsheet.get('properties', {}).get('title', 'Unknown')
             sheet_count = len(spreadsheet.get('sheets', []))
             
-            # 嘗試讀取第一行以確認讀取權限
-            # 使用helper方法獲取工作表名稱
+            # Try reading the first row to confirm read access
+            # Use the helper method to get the worksheet name
             sheet_title = self._get_sheet_title()
             range_name = f'{sheet_title}!A1:A1'
             
@@ -701,8 +702,8 @@ class GoogleSheetsClient:
                 'spreadsheet_title': title,
                 'sheet_count': sheet_count,
                 'has_read_access': True,
-                'has_write_access': True,  # 如果能讀取通常也能寫入
-                'message': f'成功連接到試算表: {title}'
+                'has_write_access': True,  # If we can read, we can usually write too
+                'message': f'Connected to spreadsheet: {title}'
             }
             
         except HttpError as error:
@@ -711,13 +712,13 @@ class GoogleSheetsClient:
                 return {
                     'success': False,
                     'error': 'Permission denied',
-                    'details': '沒有存取試算表的權限，請檢查服務帳戶權限設定'
+                    'details': 'No access to the spreadsheet; check the service account permissions'
                 }
             elif '404' in error_details:
                 return {
                     'success': False,
                     'error': 'Spreadsheet not found',
-                    'details': '找不到指定的試算表，請檢查 sheet_id 是否正確'
+                    'details': 'Spreadsheet not found; check that sheet_id is correct'
                 }
             else:
                 return {
@@ -733,40 +734,40 @@ class GoogleSheetsClient:
             }
     
     def validate_setup(self) -> Dict[str, Any]:
-        """驗證完整的 Google Sheets 設定"""
+        """Validate the complete Google Sheets setup."""
         validation_results = {
             'overall_status': 'unknown',
             'checks': {},
             'recommendations': []
         }
         
-        # 檢查 1: 憑證檔案
+        # Check 1: credentials file
         if os.path.exists(self.credentials_path):
             validation_results['checks']['credentials_file'] = {
                 'status': 'pass',
-                'message': '憑證檔案存在'
+                'message': 'Credentials file exists'
             }
         else:
             validation_results['checks']['credentials_file'] = {
                 'status': 'fail',
-                'message': f'憑證檔案不存在: {self.credentials_path}'
+                'message': f'Credentials file not found: {self.credentials_path}'
             }
-            validation_results['recommendations'].append('請確認 Google Service Account 憑證檔案路徑正確')
+            validation_results['recommendations'].append('Make sure the Google Service Account credentials file path is correct')
         
-        # 檢查 2: 服務初始化
+        # Check 2: service initialization
         if self.service:
             validation_results['checks']['service_init'] = {
                 'status': 'pass',
-                'message': 'Google Sheets 服務初始化成功'
+                'message': 'Google Sheets service initialized successfully'
             }
         else:
             validation_results['checks']['service_init'] = {
                 'status': 'fail',
-                'message': 'Google Sheets 服務初始化失敗'
+                'message': 'Google Sheets service initialization failed'
             }
-            validation_results['recommendations'].append('請檢查憑證檔案格式和權限設定')
+            validation_results['recommendations'].append('Check the credentials file format and permission settings')
         
-        # 檢查 3: 連接測試
+        # Check 3: connection test
         connection_test = self.test_connection()
         if connection_test['success']:
             validation_results['checks']['connection'] = {
@@ -783,17 +784,17 @@ class GoogleSheetsClient:
                 'message': connection_test['error'],
                 'details': connection_test.get('details', '')
             }
-            validation_results['recommendations'].append('請檢查試算表 ID 和分享權限設定')
+            validation_results['recommendations'].append('Check the spreadsheet ID and sharing permissions')
         
-        # 檢查 4: 標題設定
+        # Check 4: header setup
         if self.service and connection_test['success']:
             headers_ok = self.create_sheet_if_not_exists()
             validation_results['checks']['headers'] = {
                 'status': 'pass' if headers_ok else 'fail',
-                'message': '標題行設定成功' if headers_ok else '標題行設定失敗'
+                'message': 'Header row set up successfully' if headers_ok else 'Header row setup failed'
             }
         
-        # 總體狀態評估
+        # Overall status assessment
         failed_checks = [check for check in validation_results['checks'].values() if check['status'] == 'fail']
         if not failed_checks:
             validation_results['overall_status'] = 'healthy'
@@ -805,7 +806,7 @@ class GoogleSheetsClient:
         return validation_results
     
     def get_sheets_summary(self) -> Dict[str, Any]:
-        """獲取所有工作表的摘要資訊"""
+        """Get summary info for all worksheets."""
         if not self.service:
             return {
                 'success': False,
@@ -824,7 +825,7 @@ class GoogleSheetsClient:
                 sheet_info = sheet.get('properties', {})
                 sheet_name = sheet_info.get('title', 'Unknown')
                 
-                # 嘗試獲取每個工作表的資料行數
+                # Try to get the data row count of each worksheet
                 try:
                     range_name = f'{sheet_name}!A:A'
                     result = self.service.spreadsheets().values().get(
@@ -833,7 +834,7 @@ class GoogleSheetsClient:
                     ).execute()
                     
                     values = result.get('values', [])
-                    row_count = len(values) - 1 if len(values) > 0 else 0  # 扣除標題行
+                    row_count = len(values) - 1 if len(values) > 0 else 0  # Exclude the header row
                     
                 except Exception:
                     row_count = 0
@@ -854,8 +855,8 @@ class GoogleSheetsClient:
             }
     
     def _is_date_sheet(self, sheet_name: str) -> bool:
-        """判斷工作表名稱是否為日期格式的工作表"""
-        # 檢查是否符合 YYYYMMDD_星期X 格式
+        """Determine whether the worksheet name is a date-format sheet."""
+        # Check whether it matches the YYYYMMDD_星期X format
         if '_星期' in sheet_name and len(sheet_name.split('_')[0]) == 8:
             try:
                 date_part = sheet_name.split('_')[0]
@@ -866,7 +867,7 @@ class GoogleSheetsClient:
         return False
     
     def organize_existing_orders_by_date(self, source_sheet: str = None) -> Dict[str, Any]:
-        """將現有訂單按日期重新組織到不同的工作表"""
+        """Reorganize existing orders into separate worksheets by date."""
         if not self.service:
             return {
                 'success': False,
@@ -874,11 +875,11 @@ class GoogleSheetsClient:
             }
         
         try:
-            # 確定來源工作表
+            # Determine the source worksheet
             if not source_sheet:
                 source_sheet = self._get_sheet_title()
             
-            # 讀取來源工作表的所有資料
+            # Read all data from the source worksheet
             range_name = f'{source_sheet}!A:K'
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
@@ -889,30 +890,30 @@ class GoogleSheetsClient:
             if len(values) <= 1:
                 return {
                     'success': True,
-                    'message': '沒有需要重新組織的訂單資料',
+                    'message': 'No order data needs reorganizing',
                     'processed_orders': 0
                 }
             
-            # 跳過標題行
+            # Skip the header row
             header_row = values[0]
             data_rows = values[1:]
             
-            # 按出貨日期分組
+            # Group by shipping date
             organized_orders = {}
             processed_count = 0
             
             for row in data_rows:
-                if len(row) < 8:  # 確保有出貨日期欄位
+                if len(row) < 8:  # Make sure the shipping date column exists
                     continue
                 
-                # 解析出貨日期 (第8欄，索引7)
+                # Parse the shipping date (column 8, index 7)
                 shipping_date_str = row[7] if len(row) > 7 else ''
                 
                 if shipping_date_str:
-                    # 嘗試從已格式化的日期中提取
+                    # Try extracting from an already-formatted date
                     parsed_date = None
                     
-                    # 如果是 YYYY-MM-DD(星期X) 格式
+                    # If it is in YYYY-MM-DD(星期X) format
                     if '(' in shipping_date_str and ')' in shipping_date_str:
                         date_part = shipping_date_str.split('(')[0]
                         try:
@@ -920,7 +921,7 @@ class GoogleSheetsClient:
                         except ValueError:
                             pass
                     
-                    # 如果是標準 YYYY-MM-DD 格式
+                    # If it is in standard YYYY-MM-DD format
                     if not parsed_date:
                         parsed_date = time_utils.parse_shipping_date(shipping_date_str)
                     
@@ -933,18 +934,18 @@ class GoogleSheetsClient:
                         organized_orders[sheet_name].append(row)
                         processed_count += 1
             
-            # 建立新的工作表並寫入資料
+            # Create the new worksheets and write the data
             created_sheets = []
             
             for sheet_name, orders in organized_orders.items():
-                # 建立工作表（如果不存在）
+                # Create the worksheet (if it doesn't exist)
                 if not self._get_sheet_by_name(sheet_name):
                     self._create_sheet_by_date(
                         datetime.strptime(sheet_name.split('_')[0], '%Y%m%d')
                     )
                     created_sheets.append(sheet_name)
                 
-                # 寫入資料到目標工作表
+                # Write the data to the target worksheet
                 range_name = f'{sheet_name}!A:J'
                 body = {
                     'values': orders,
@@ -963,21 +964,21 @@ class GoogleSheetsClient:
                 'processed_orders': processed_count,
                 'created_sheets': created_sheets,
                 'organized_sheets': list(organized_orders.keys()),
-                'message': f'成功重新組織 {processed_count} 份訂單到 {len(organized_orders)} 個工作表'
+                'message': f'Reorganized {processed_count} orders into {len(organized_orders)} worksheets'
             }
             
         except Exception as e:
             logger.error(f"Error organizing existing orders: {e}")
             return {
                 'success': False,
-                'error': f'重新組織訂單時發生錯誤: {e}'
+                'error': f'Error while reorganizing orders: {e}'
             }
     
     def get_orders_by_date(self, target_date: str) -> Dict[str, Any]:
-        """根據日期獲取訂單資料
+        """Get order data for a given date.
         
         Args:
-            target_date: 目標日期，格式如 '08-27', '2024-08-27' 等
+            target_date: Target date, in formats like '08-27', '2024-08-27', etc.
             
         Returns:
             Dict containing success status and orders data
@@ -992,35 +993,35 @@ class GoogleSheetsClient:
         try:
             from .time_utils import time_utils
             
-            # 解析目標日期
+            # Parse the target date
             parsed_date = time_utils.parse_shipping_date(target_date)
             if not parsed_date:
                 return {
                     'success': False,
-                    'error': f'無法解析日期格式: {target_date}',
+                    'error': f'無法解析日期格式: {target_date}',  # shown to the user in the LINE reply ("cannot parse date format")
                     'orders': []
                 }
             
-            # 生成可能的工作表名稱
+            # Build the expected worksheet name
             target_sheet_name = time_utils.format_date_with_weekday(parsed_date, 'sheet_name')
             
-            # 先嘗試從特定日期的工作表讀取
+            # First try reading from the sheet for that date
             orders = []
             found_sheet = False
             
-            # 檢查是否存在對應的日期工作表
+            # Check whether a matching date sheet exists
             if self._get_sheet_by_name(target_sheet_name):
                 found_sheet = True
                 sheet_orders = self._get_orders_from_sheet(target_sheet_name, target_date)
                 orders.extend(sheet_orders)
             
-            # 如果沒有找到特定工作表，或需要搜尋所有工作表
+            # If no specific sheet was found, or all sheets need searching
             if not found_sheet or not orders:
-                # 搜尋所有工作表
+                # Search all worksheets
                 all_sheets = self._get_all_sheets()
                 for sheet in all_sheets:
                     sheet_name = sheet.get('properties', {}).get('title', '')
-                    if sheet_name != target_sheet_name:  # 避免重複搜尋
+                    if sheet_name != target_sheet_name:  # Avoid searching the same sheet twice
                         sheet_orders = self._get_orders_from_sheet(sheet_name, target_date)
                         orders.extend(sheet_orders)
             
@@ -1036,16 +1037,16 @@ class GoogleSheetsClient:
             logger.error(f"Error getting orders by date {target_date}: {e}")
             return {
                 'success': False,
-                'error': f'查詢日期訂單時發生錯誤: {e}',
+                'error': f'查詢日期訂單時發生錯誤: {e}',  # shown to the user in the LINE reply ("error querying orders for the date")
                 'orders': []
             }
     
     def _get_orders_from_sheet(self, sheet_name: str, target_date: str) -> List[Dict[str, Any]]:
-        """從指定工作表中獲取特定日期的訂單"""
+        """Get orders for a specific date from the given worksheet."""
         orders = []
         
         try:
-            # 讀取工作表資料
+            # Read the worksheet data
             range_name = f'{sheet_name}!A:K'
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.sheet_id,
@@ -1053,36 +1054,36 @@ class GoogleSheetsClient:
             ).execute()
             
             values = result.get('values', [])
-            if len(values) <= 1:  # 只有標題行或空白
+            if len(values) <= 1:  # Only a header row, or empty
                 return orders
             
-            # 跳過標題行
+            # Skip the header row
             data_rows = values[1:]
             
             for row in data_rows:
-                if len(row) < 8:  # 確保有足夠的欄位
+                if len(row) < 8:  # Make sure there are enough columns
                     continue
                 
-                # 由於新的欄位結構沒有出貨日期，我們改為檢查地址欄位來判斷是否為有效記錄
-                # 如果有地址就視為有效訂單（暫時的解決方案）
+                # The new column layout has no shipping date, so we check the address column to decide whether a row is a valid record
+                # Any row with an address counts as a valid order (temporary workaround)
                 shipping_address = row[7] if len(row) > 7 else ''
                 
-                # 暫時移除日期匹配，因為新結構沒有日期欄位
-                # TODO: 需要重新設計日期匹配邏輯
-                if shipping_address:  # 有地址就算是有效訂單
-                    # 解析訂單資料
+                # Date matching temporarily removed because the new layout has no date column
+                # TODO: redesign the date-matching logic
+                if shipping_address:  # Has an address, so it counts as a valid order
+                    # Parse the order data
                     order = {
-                        'sender_name': row[0] if len(row) > 0 else '',     # 訂購/寄件人
-                        'sender_address': row[1] if len(row) > 1 else '',  # 寄件地址
-                        'receiver_name': row[2] if len(row) > 2 else '',   # 收件人
-                        'items_name': row[3] if len(row) > 3 else '',      # 品項
-                        'items_quantity': row[4] if len(row) > 4 else '',  # 數量
-                        'sender_phone': row[5] if len(row) > 5 else '',    # 訂購人電話
-                        'receiver_phone': row[6] if len(row) > 6 else '',  # 收件人電話
-                        'shipping_address': row[7] if len(row) > 7 else '', # 地址
-                        'total_price': row[8] if len(row) > 8 else '',     # 總價
-                        'payment_status': row[9] if len(row) > 9 else '',  # 付款狀況
-                        'last_5_digits': row[10] if len(row) > 10 else '', # 末5碼
+                        'sender_name': row[0] if len(row) > 0 else '',     # Orderer/sender
+                        'sender_address': row[1] if len(row) > 1 else '',  # Sender address
+                        'receiver_name': row[2] if len(row) > 2 else '',   # Receiver
+                        'items_name': row[3] if len(row) > 3 else '',      # Items
+                        'items_quantity': row[4] if len(row) > 4 else '',  # Quantity
+                        'sender_phone': row[5] if len(row) > 5 else '',    # Orderer phone
+                        'receiver_phone': row[6] if len(row) > 6 else '',  # Receiver phone
+                        'shipping_address': row[7] if len(row) > 7 else '', # Address
+                        'total_price': row[8] if len(row) > 8 else '',     # Total price
+                        'payment_status': row[9] if len(row) > 9 else '',  # Payment status
+                        'last_5_digits': row[10] if len(row) > 10 else '', # Last 5 digits
                         'source_sheet': sheet_name
                     }
                     orders.append(order)
@@ -1093,20 +1094,20 @@ class GoogleSheetsClient:
         return orders
     
     def _date_matches_target(self, shipping_date: str, target_date: str) -> bool:
-        """檢查出貨日期是否符合目標日期"""
+        """Check whether the shipping date matches the target date."""
         if not shipping_date:
             return False
         
         try:
             from .time_utils import time_utils
             
-            # 解析目標日期
+            # Parse the target date
             target_parsed = time_utils.parse_shipping_date(target_date)
             if not target_parsed:
                 return False
             
-            # 解析出貨日期
-            # 處理格式如 "2024-08-27(星期二)" 的情況
+            # Parse the shipping date
+            # Handle formats like "2024-08-27(星期二)"
             clean_shipping_date = shipping_date
             if '(' in shipping_date and ')' in shipping_date:
                 clean_shipping_date = shipping_date.split('(')[0]
@@ -1115,7 +1116,7 @@ class GoogleSheetsClient:
             if not shipping_parsed:
                 return False
             
-            # 比較日期（只比較年月日，忽略時間）
+            # Compare dates (year/month/day only, ignore time)
             return (target_parsed.year == shipping_parsed.year and
                    target_parsed.month == shipping_parsed.month and
                    target_parsed.day == shipping_parsed.day)

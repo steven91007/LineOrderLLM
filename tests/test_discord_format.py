@@ -1,8 +1,8 @@
-"""discord_format 的單元測試
+"""Unit tests for discord_format
 
-這裡不碰網路、不碰 LLM、不需要 Google 憑證，訂單全部用手工造的。
-主要在守兩件事：Discord 的硬限制不能被踩到，以及幾個容易寫錯的邏輯
-（「含需確認」的數字、已存在的警告、空總表的回傳形狀）。
+No network, no LLM, no Google credentials; all orders are hand-built.
+They mainly guard two things: Discord's hard limits are never exceeded, and a few easy-to-get-wrong
+pieces of logic (the "含需確認" (include review) count, the duplicate warning, the empty-sheet return shape).
 """
 
 from collections import OrderedDict
@@ -15,7 +15,7 @@ from src.services.shipping_summary import SummaryLine
 
 
 def make_order(index: int = 1, status: str = 'ready', long_text: bool = False) -> ParsedOrder:
-    """造一筆訂單。long_text=True 時每個欄位都塞到接近上限，用來壓字數"""
+    """Build one order. With long_text=True every field is padded near the limit to stress the char count"""
     filler = '長' * 300 if long_text else ''
     order = {
         'orderer': f'訂購人{index}{filler}',
@@ -50,7 +50,7 @@ def make_orders(ready: int = 0, review: int = 0, duplicate: int = 0, long_text: 
     return orders
 
 
-# ─────────────────────── 狀態計數 ───────────────────────
+# ─────────────────────── Status counts ───────────────────────
 
 
 def test_count_statuses():
@@ -59,13 +59,13 @@ def test_count_statuses():
 
 
 def test_parsed_order_status_duplicate_wins_over_problems():
-    """duplicate 蓋過 problems（chat_log_importer.py:69-72）"""
+    """duplicate takes precedence over problems (chat_log_importer.py:69-72)"""
     parsed = make_order(status='review')
     parsed.duplicate = True
     assert parsed.status == 'duplicate'
 
 
-# ─────────────────────── Discord 硬限制 ───────────────────────
+# ─────────────────────── Discord hard limits ───────────────────────
 
 
 def test_order_embeds_never_exceed_ten_per_message():
@@ -76,14 +76,14 @@ def test_order_embeds_never_exceed_ten_per_message():
 
 
 def test_order_embeds_respect_total_char_budget():
-    """一則訊息裡所有 embed 加起來不能超過 Discord 的 6000 字"""
+    """All embeds in one message combined must not exceed Discord's 6000 chars"""
     messages = fmt.order_embeds(make_orders(ready=10, long_text=True))
     for embeds in messages:
         assert sum(len(e) for e in embeds) <= 6000
 
 
 def test_order_embeds_split_when_content_is_long():
-    """欄位塞爆時要自動拆成多則訊息，而不是硬塞成一則"""
+    """When fields overflow, split into multiple messages automatically instead of cramming into one"""
     messages = fmt.order_embeds(make_orders(ready=10, long_text=True))
     assert len(messages) > 1
 
@@ -95,7 +95,7 @@ def test_every_embed_stays_within_field_limit():
 
 
 def test_order_embeds_caps_at_detail_limit():
-    """超過上限的部分不進 embed，改走附件"""
+    """Anything beyond the limit goes to the attachment, not into embeds"""
     embeds = [e for msg in fmt.order_embeds(make_orders(ready=40)) for e in msg]
     assert len(embeds) == fmt.DETAIL_EMBED_LIMIT
 
@@ -106,7 +106,7 @@ def test_truncate_marks_cut():
     assert fmt.truncate(None, 10) == ''
 
 
-# ─────────────────────── 附件 fallback ───────────────────────
+# ─────────────────────── Attachment fallback ───────────────────────
 
 
 def test_needs_attachment_only_above_limit():
@@ -127,11 +127,11 @@ def test_preview_text_shows_problems_and_duplicates():
     assert '試算表中已有相同收件人' in text
 
 
-# ─────────────────────── 已存在的警告 ───────────────────────
+# ─────────────────────── Duplicate warning ───────────────────────
 
 
 def test_summary_embed_warns_only_when_duplicates_exist():
-    """有已存在的訂單時才出現「不會寫入」的警告欄位"""
+    """The "不會寫入" (won't be written) warning field appears only when duplicates exist"""
     counts = {'ready': 3, 'review': 0, 'duplicate': 0}
     embed = fmt.summary_embed(make_orders(ready=3), counts, '來源', 'model', 1.0)
     assert not any('不會寫入' in f.name for f in embed.fields)
@@ -149,17 +149,17 @@ def test_summary_embed_within_limits():
     assert len(embed.fields) <= fmt.MAX_FIELDS_PER_EMBED
 
 
-# ─────────────────────── 品項 ───────────────────────
+# ─────────────────────── Items ───────────────────────
 
 
 def test_format_items_handles_none():
-    """giftbox / family 都可能是 None（模型沒對到表單選項）"""
+    """giftbox / family may both be None (model didn't match a form option)"""
     assert fmt.format_items({'giftbox': None, 'family': None}) == '（無）'
     assert fmt.format_items({'giftbox': '20A 一盒 $1,150', 'family': None}) == '20A 一盒 $1,150'
     assert fmt.format_items({'giftbox': '禮盒', 'family': '家庭號'}) == '禮盒 / 家庭號'
 
 
-# ─────────────────────── 寫入結果的四種形狀 ───────────────────────
+# ─────────────────────── The four write-result shapes ───────────────────────
 
 
 def test_write_result_column_mismatch():
@@ -174,7 +174,7 @@ def test_write_result_column_mismatch():
 
 
 def test_write_result_nothing_eligible_has_no_updated_range():
-    """這個形狀沒有 updated_range，不能直接用 result['updated_range']"""
+    """This shape has no updated_range, so result['updated_range'] can't be used directly"""
     result = {'success': True, 'appended_rows': 0, 'skipped': 3}
     embed = fmt.write_result_embed(result, {'duplicate': 3}, True)
     assert '沒有訂單被寫入' in embed.title
@@ -189,14 +189,14 @@ def test_write_result_success():
 
 
 def test_write_result_api_error_has_no_mismatches_key():
-    """Sheets API 失敗的形狀沒有 mismatches，用 .get 才不會 KeyError"""
+    """The Sheets API failure shape has no mismatches; use .get to avoid KeyError"""
     result = {'success': False, 'error': 'Google Sheets API 錯誤：429 Quota exceeded', 'skipped': 2}
     embed = fmt.write_result_embed(result, {'duplicate': 0}, False)
     assert '寫入失敗' in embed.title
     assert any('配額' in f.name for f in embed.fields)
 
 
-# ─────────────────────── 日期分頁整理 ───────────────────────
+# ─────────────────────── Date sheet organizing ───────────────────────
 
 
 def make_organize_result(sheet_count: int = 3, stale: int = 0):
@@ -233,7 +233,7 @@ def test_organize_preview_small():
 
 
 def test_organize_preview_falls_back_to_attachment():
-    """分頁太多時要退回附件，不能撞 25 field 上限"""
+    """With too many sheets, fall back to an attachment rather than hitting the 25-field limit"""
     embed, overflow = fmt.organize_preview_embed(make_organize_result(30))
     assert overflow is not None
     assert len(embed.fields) <= fmt.MAX_FIELDS_PER_EMBED
@@ -247,8 +247,8 @@ def test_organize_preview_highlights_stale_sheets():
 
 
 def test_organize_preview_empty_sheet_shape_does_not_crash():
-    """空總表的回傳完全沒有 summaries／stale_sheets 這兩個 key
-    （sheet_date_organizer.py:79-85）"""
+    """The empty-master-sheet return has no summaries / stale_sheets keys at all
+    (sheet_date_organizer.py:79-85)"""
     result = {
         'success': True,
         'groups': OrderedDict(),
@@ -262,7 +262,7 @@ def test_organize_preview_empty_sheet_shape_does_not_crash():
 
 
 def test_organize_summary_dedupes_unparsed():
-    """unparsed 會有重複，要比照 organize_by_date.py:100 先 set 再排序"""
+    """unparsed may contain duplicates; dedupe with set then sort, like organize_by_date.py:100"""
     result = make_organize_result(1)
     name = next(iter(result['groups']))
     result['summaries'][name]['unparsed'] = ['神秘品項', '神秘品項', '另一個']
@@ -271,7 +271,7 @@ def test_organize_summary_dedupes_unparsed():
 
 
 def test_organize_result_partial_failure_reports_progress():
-    """部分寫入失敗時要講清楚做到哪，organize_by_date.py 是直接丟掉這個資訊的"""
+    """On partial write failure, report how far it got; organize_by_date.py just discards this information"""
     result = {
         'success': False,
         'error': '寫入日期分頁失敗：500 Internal Error',
@@ -291,11 +291,11 @@ def test_organize_result_success():
     assert '清空 1 個' in embed.description
 
 
-# ─────────────────────── 按鈕標籤 ───────────────────────
+# ─────────────────────── Button labels ───────────────────────
 
 
 class _StubHandler:
-    """View 的 __init__ 只會用到 pending.counts，其餘都不碰"""
+    """The View's __init__ only uses pending.counts and touches nothing else"""
     authorized_users = ['*']
 
     def is_authorized(self, user_id):
@@ -321,8 +321,8 @@ def _make_view(ready: int, review: int, duplicate: int):
 
 
 def test_include_review_button_counts_ready_plus_review():
-    """write(include_review=True) 的 allowed 是 {'ready','review'}，兩種都會寫。
-    按鈕只標 review 的話數字會和 appended_rows 對不上。"""
+    """allowed for write(include_review=True) is {'ready','review'}, so both get written.
+    If the button showed only review, its count would not match appended_rows."""
     view = _make_view(ready=3, review=2, duplicate=1)
     labels = [item.label for item in view.children]
     assert labels[0] == '寫入可寫入的 (3)'
@@ -338,13 +338,13 @@ def test_buttons_disabled_when_nothing_to_write():
 
 
 def test_confirm_view_claim_is_single_use():
-    """連點防護：第二次 _claim 必須回 False"""
+    """Double-click guard: the second _claim must return False"""
     view = _make_view(ready=1, review=0, duplicate=0)
     assert view._claim() is True
     assert view._claim() is False
 
 
-# ─────────────────────── 私訊 / 頻道範圍 ───────────────────────
+# ─────────────────────── DM / channel scope ───────────────────────
 
 
 def _make_handler(order_channel_id: int):
@@ -359,7 +359,7 @@ def _make_handler(order_channel_id: int):
 
 
 def test_dm_is_always_allowed():
-    """私訊一律放行，不管有沒有設定頻道"""
+    """DMs are always allowed, whether or not a channel is configured"""
     assert _make_handler(0).is_allowed_context(999, is_dm=True)
     assert _make_handler(555).is_allowed_context(999, is_dm=True)
 
@@ -371,7 +371,7 @@ def test_only_configured_channel_allowed_in_guild():
 
 
 def test_no_channel_configured_means_dm_only():
-    """沒設定頻道時，伺服器裡的訊息一律不理（不能因為 0 == 0 就放行）"""
+    """With no channel configured, server messages are always ignored (must not pass just because 0 == 0)"""
     handler = _make_handler(0)
     assert not handler.is_allowed_context(0, is_dm=False)
     assert not handler.is_allowed_context(999, is_dm=False)

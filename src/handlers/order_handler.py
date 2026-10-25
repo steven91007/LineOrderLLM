@@ -29,12 +29,12 @@ class OrderHandler:
     def __init__(self, configuration, authorized_users, client_type='dspy', openai_api_key=None, openai_model=None, dspy_api_key=None, dspy_model=None, dspy_max_retries=3, google_sheet_id=None, google_credentials_path=None, liff_id=None, base_url=None):
         self.configuration = configuration
         self.authorized_users = authorized_users
-        self.order_sessions = {}  # 存儲用戶的訂單處理狀態
+        self.order_sessions = {}  # Per-user order processing state
         self.client_type = client_type
-        self.liff_id = liff_id or '2007889032-OolKDrp3'  # LIFF 應用程式 ID
-        self.base_url = base_url  # 伺服器基礎 URL
+        self.liff_id = liff_id or '2007889032-OolKDrp3'  # LIFF app ID
+        self.base_url = base_url  # Server base URL
         
-        # 初始化訂單解析客戶端
+        # Initialize the order parsing client
         if client_type == 'dspy' and openai_api_key:
             self.order_client = DSPyOrderClient(openai_api_key)
         elif openai_api_key:
@@ -42,62 +42,62 @@ class OrderHandler:
         else:
             self.order_client = None
         
-        # Google Sheets 客戶端（啟用按日期自動分組）
+        # Google Sheets client (with automatic grouping by date enabled)
         self.sheets_client = GoogleSheetsClient(
             google_credentials_path, 
             google_sheet_id, 
             auto_organize_by_date=True
         ) if google_sheet_id and google_credentials_path else None
         
-        # 初始化 Google Sheets（建立標題）
+        # Initialize Google Sheets (create the header row)
         if self.sheets_client:
             self.sheets_client.create_sheet_if_not_exists()
         
-        # 初始化 LIFF 處理器
+        # Initialize the LIFF handler
         self.liff_handler = LIFFHandler(
             order_handler=self,
             google_sheets_client=self.sheets_client
         )
         
-        # 初始化訂單匯總生成器
+        # Initialize the order summary generator
         self.summary_generator = OrderSummaryGenerator()
     
     def is_authorized(self, user_id: str) -> bool:
-        """檢查用戶是否有權限使用訂單功能"""
+        """Check whether the user is allowed to use the order features."""
         return user_id in self.authorized_users or '*' in self.authorized_users
     
     def handle_text_message(self, event: MessageEvent) -> None:
-        """處理文字訊息"""
+        """Handle a text message."""
         user_id = event.source.user_id
         text = event.message.text
         
-        # 檢查是否為訂單關鍵字
+        # Check for an order keyword
         if text.strip() in ['#訂單', '#order', '訂單處理']:
             if not self.is_authorized(user_id):
                 self._reply_text(event, "抱歉，您沒有權限使用此功能。")
                 return
             
-            # 顯示訂單處理選單
+            # Show the order menu
             self._show_order_menu(event)
         elif text.strip().startswith('#匯總') or text.strip().startswith('#summary'):
-            # 處理匯總指令
+            # Handle the summary command
             if not self.is_authorized(user_id):
                 self._reply_text(event, "抱歉，您沒有權限使用此功能。")
                 return
             
             self._handle_summary_request(event, text.strip())
         elif user_id in self.order_sessions and self.order_sessions[user_id].get('status') == 'waiting_order_text':
-            # 用戶正在輸入訂單內容
+            # The user is entering order text
             self._process_order_text(event)
     
     def handle_postback(self, event: PostbackEvent) -> None:
-        """處理按鈕回應"""
+        """Handle button (postback) responses."""
         user_id = event.source.user_id
         data = json.loads(event.postback.data)
         action = data.get('action')
         
         if action == 'start_order':
-            # 開始訂單處理流程
+            # Start the order flow
             self.order_sessions[user_id] = {
                 'status': 'waiting_order_text',
                 'data': {}
@@ -109,32 +109,32 @@ class OrderHandler:
                 "💡 提醒：寄件人資訊為選填，系統會自動解析您的訊息。"
             )
         elif action == 'cancel_order':
-            # 取消訂單處理
+            # Cancel order processing
             if user_id in self.order_sessions:
                 del self.order_sessions[user_id]
             self._reply_text(event, "已取消訂單處理。")
         elif action == 'show_orders_confirmation':
-            # 顯示訂單確認介面
+            # Show the order confirmation view
             self._show_orders_confirmation_from_postback(event)
         elif action == 'confirm_all_orders_batch':
-            # 批量確認所有訂單（新版）
+            # Batch-confirm all orders (new version)
             self._confirm_all_orders_batch(event)
         elif action == 'edit_order_liff':
-            # 使用 LIFF 編輯特定訂單
+            # Edit a specific order via LIFF
             order_index = data.get('order_index', 1)
             self._edit_order_with_liff(event, order_index)
         elif action == 'open_liff_editor':
-            # 開啟 LIFF 編輯器（編輯全部訂單）
+            # Open the LIFF editor (edit all orders)
             self._open_liff_editor(event)
         elif action == 'retry_single_order':
-            # 建議單筆輸入
+            # Suggest entering one order at a time
             self._reply_text_with_retry_option(event, 
                 "💡 建議您將訂單分開，逐筆輸入以確保解析準確性。\n\n"
                 "請重新輸入單一訂單內容："
             )
     
     def _show_order_menu(self, event: MessageEvent) -> None:
-        """顯示訂單處理選單"""
+        """Show the order menu."""
         with ApiClient(self.configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             
@@ -166,16 +166,16 @@ class OrderHandler:
             )
     
     def _process_order_text(self, event: MessageEvent) -> None:
-        """處理訂單文字內容"""
+        """Process the order text."""
         user_id = event.source.user_id
         order_text = event.message.text
         
-        # 儲存原始訂單文字
+        # Store the raw order text
         self.order_sessions[user_id]['data']['raw_text'] = order_text
         self.order_sessions[user_id]['status'] = 'parsing'
         
         if self.order_client:
-            # 使用訂單解析客戶端（OpenAI 或 DSPy）
+            # Use the order parsing client (OpenAI or DSPy)
             result = self.order_client.parse_order(order_text)
             
             if result['success']:
@@ -183,17 +183,17 @@ class OrderHandler:
                 validation = self.order_client.validate_parsed_order(parsed_data)
                 
                 if validation['is_valid']:
-                    # 儲存解析結果
+                    # Store the parse result
                     self.order_sessions[user_id]['data']['parsed'] = parsed_data
                     
-                    # 統一顯示訂單確認介面（使用 Flex Message 輪播）
+                    # Always show the confirmation view (Flex Message carousel)
                     self.order_sessions[user_id]['status'] = 'confirming'
                     self._show_orders_confirmation(event, parsed_data)
                 else:
-                    # 顯示驗證錯誤
+                    # Show the validation error
                     self._handle_validation_error(event, validation)
             else:
-                # 解析失敗處理
+                # Handle a parse failure
                 error_message = result.get('error', '未知錯誤')
                 suggestion = result.get('suggestion', '')
                 
@@ -202,20 +202,20 @@ class OrderHandler:
                 else:
                     self._reply_text(event, f"解析訂單時發生錯誤：{error_message}\n\n請稍後再試或聯絡管理員。")
         else:
-            # 沒有設定訂單解析客戶端
+            # No order parsing client configured
             client_name = self.client_type.upper() if self.client_type else 'AI'
             self._reply_text(event, 
                 f"已收到您的訂單資訊：\n\n{order_text}\n\n"
                 f"（目前尚未啟用 {client_name} 自動解析功能）"
             )
         
-        # 如果不是在確認狀態，清除會話
+        # Clear the session unless it is in the confirming state
         if (user_id in self.order_sessions and 
             self.order_sessions[user_id]['status'] not in ['confirming']):
             del self.order_sessions[user_id]
     
     def _show_orders_confirmation(self, event: MessageEvent, parsed_data: Dict[str, Any]) -> None:
-        """顯示訂單確認介面（使用 Flex Message 輪播）"""
+        """Show the order confirmation view (Flex Message carousel)."""
         orders = parsed_data.get('orders', [])
         total_orders = len(orders)
         user_id = event.source.user_id
@@ -224,17 +224,17 @@ class OrderHandler:
             self._reply_text(event, "沒有找到有效的訂單資料。")
             return
         
-        # 創建 Flex Message 輪播
+        # Build the Flex Message carousel
         flex_bubbles = []
         for i, order in enumerate(orders, 1):
             bubble = self._create_order_flex_bubble(order, i, total_orders)
             flex_bubbles.append(bubble)
         
-        # 添加最後一頁：確認全部訂單
+        # Add the last page: confirm all orders
         confirm_all_bubble = self._create_confirm_all_bubble(total_orders, user_id)
         flex_bubbles.append(confirm_all_bubble)
         
-        # 構建 Flex Carousel
+        # Assemble the Flex carousel
         flex_carousel = {
             "type": "carousel",
             "contents": flex_bubbles
@@ -256,13 +256,13 @@ class OrderHandler:
             )
     
     def _create_order_flex_bubble(self, order: Dict[str, Any], order_index: int, total_orders: int) -> Dict[str, Any]:
-        """創建單一訂單的 Flex Bubble"""
-        # 格式化商品列表
+        """Build the Flex bubble for a single order."""
+        # Format the item list
         items_text = ""
         for item in order.get('items', []):
             items_text += f"• {item['name']} x{item['quantity']}\n"
         
-        # 處理可選的寄件人資訊（分開顯示）
+        # Optional sender info (shown on separate lines)
         sender_info = ""
         if order.get('sender_name') or order.get('sender_phone'):
             if order.get('sender_name'):
@@ -321,7 +321,7 @@ class OrderHandler:
             }
         }
         
-        # 如果發貨日期存在，添加到內容中
+        # If there is a shipping date, add it to the content
         if order.get('shipping_date'):
             bubble["body"]["contents"][0]["text"] = bubble["body"]["contents"][0]["text"].replace(
                 f"\n\n地址: {order.get('shipping_address', '')}",
@@ -331,9 +331,9 @@ class OrderHandler:
         return bubble
     
     def _create_confirm_all_bubble(self, total_orders: int, user_id: str = None) -> Dict[str, Any]:
-        """創建確認全部訂單的 Flex Bubble"""
+        """Build the "confirm all orders" Flex bubble."""
         
-        # 基礎按鈕
+        # Base buttons
         buttons = [
             {
                 "type": "button",
@@ -350,7 +350,7 @@ class OrderHandler:
             }
         ]
         
-        # 如果有 LIFF ID，添加 LIFF 編輯按鈕
+        # If a LIFF ID is set, add the LIFF edit button
         if self.liff_id and user_id:
             buttons.insert(0, {
                 "type": "button",
@@ -367,7 +367,7 @@ class OrderHandler:
                 }
             })
         
-        # 添加重新檢查按鈕
+        # Add the "re-check" button
         buttons.append({
             "type": "button",
             "style": "secondary",
@@ -419,7 +419,7 @@ class OrderHandler:
         return bubble
     
     def _show_orders_confirmation_from_postback(self, event: PostbackEvent) -> None:
-        """從 postback 顯示訂單確認介面"""
+        """Show the order confirmation view from a postback."""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -431,7 +431,7 @@ class OrderHandler:
         self._show_orders_confirmation(event, parsed_data)
     
     def _edit_order_with_liff(self, event: PostbackEvent, order_index: int) -> None:
-        """使用 LIFF 編輯特定訂單"""
+        """Edit a specific order via LIFF."""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -447,7 +447,7 @@ class OrderHandler:
             return
         
         if not self.liff_id:
-            # LIFF 未設定，顯示友好的錯誤訊息
+            # LIFF is not configured; show a friendly error message
             self._reply_text(event, 
                 "🌐 網頁編輯功能需要管理員設定 LIFF 應用程式。\n\n"
                 f"目前訂單 {order_index} 的資訊：\n"
@@ -459,13 +459,13 @@ class OrderHandler:
             return
         
         try:
-            # 建立 LIFF 會話（包含所有訂單）
+            # Create a LIFF session (with all orders)
             session_id = self.liff_handler.create_liff_session(user_id, parsed_data)
             
-            # 建立 LIFF URL
+            # Build the LIFF URL
             liff_url = self.liff_handler.get_liff_url(f"{session_id}&focus={order_index}", self.liff_id, self.base_url)
             
-            # 發送 LIFF 訊息
+            # Send the LIFF message
             with ApiClient(self.configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 
@@ -537,7 +537,7 @@ class OrderHandler:
     
     
     def _open_liff_editor(self, event: PostbackEvent) -> None:
-        """開啟 LIFF 編輯器"""
+        """Open the LIFF editor."""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -550,18 +550,18 @@ class OrderHandler:
             return
         
         try:
-            # 建立 LIFF 會話
+            # Create a LIFF session
             parsed_data = self.order_sessions[user_id]['data']['parsed']
             session_id = self.liff_handler.create_liff_session(user_id, parsed_data)
             
-            # 建立 LIFF URL
+            # Build the LIFF URL
             liff_url = self.liff_handler.get_liff_url(session_id, self.liff_id, self.base_url)
             
-            # 發送 LIFF 訊息
+            # Send the LIFF message
             with ApiClient(self.configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 
-                # 使用 URI Action 開啟 LIFF
+                # Open LIFF with a URI action
                 flex_message_content = {
                     "type": "bubble",
                     "header": {
@@ -626,10 +626,10 @@ class OrderHandler:
             self._reply_text(event, "❌ 開啟編輯器失敗，請稍後重試或使用按鈕編輯功能。")
     
     def _format_single_order_summary(self, order_data: Dict[str, Any]) -> str:
-        """格式化單一訂單摘要"""
+        """Format a single-order summary."""
         summary = "📦 訂單資訊：\n\n"
         
-        # 寄件人資訊（選填）
+        # Sender info (optional)
         if order_data.get('sender_name') or order_data.get('sender_phone'):
             if order_data.get('sender_name'):
                 summary += f"👤 寄件人：{order_data['sender_name']}\n"
@@ -637,29 +637,29 @@ class OrderHandler:
                 summary += f"📞 寄件人電話：{order_data['sender_phone']}\n"
             summary += "\n"
         
-        # 收件人資訊
+        # Receiver info
         summary += f"👥 收件人：{order_data.get('receiver_name', '')}\n"
         summary += f"📞 收件人電話：{order_data.get('receiver_phone', '')}\n\n"
         
-        # 商品明細
+        # Item details
         if order_data.get('items'):
             summary += "📋 商品明細：\n"
             for item in order_data['items']:
                 summary += f"  • {item['name']} x {item['quantity']}\n"
             summary += "\n"
         
-        # 發貨日期
+        # Shipping date
         if order_data.get('shipping_date'):
             summary += f"📅 預計發貨日：{order_data['shipping_date']}\n"
         
-        # 收件地址
+        # Shipping address
         summary += f"📦 收件地址：{order_data.get('shipping_address', '')}\n\n"
         summary += "請確認以上資訊是否正確？"
         
         return summary
     
     def _show_parsing_failure_with_suggestion(self, event: MessageEvent) -> None:
-        """顯示解析失敗並建議單筆輸入"""
+        """Show a parse failure and suggest entering one order at a time."""
         with ApiClient(self.configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             
@@ -694,7 +694,7 @@ class OrderHandler:
             )
     
     def _handle_validation_error(self, event: MessageEvent, validation: Dict[str, Any]) -> None:
-        """處理驗證錯誤"""
+        """Handle a validation error."""
         error_type = validation.get('error_type', 'validation_error')
         error_message = validation.get('error_message', '驗證失敗')
         
@@ -704,7 +704,7 @@ class OrderHandler:
             self._reply_text(event, f"❌ {error_message}\n\n請重新輸入訂單資訊。")
     
     def _reply_text(self, event, text: str) -> None:
-        """回覆文字訊息"""
+        """Reply with a text message."""
         with ApiClient(self.configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             line_bot_api.reply_message(
@@ -715,10 +715,10 @@ class OrderHandler:
             )
     
     def _reply_text_with_retry_option(self, event: PostbackEvent, text: str) -> None:
-        """回覆文字並設定重試狀態"""
+        """Reply with text and put the session back into the retry state."""
         user_id = event.source.user_id
         
-        # 重設狀態為等待輸入
+        # Reset the state to waiting for input
         if user_id in self.order_sessions:
             self.order_sessions[user_id]['status'] = 'waiting_order_text'
         
@@ -728,8 +728,8 @@ class OrderHandler:
     
     
     def _save_order_to_sheets(self, event: PostbackEvent, order_data: Dict[str, Any], order_index: int = 1) -> None:
-        """儲存訂單到 Google Sheets 並回覆結果"""
-        # 產生訂單編號
+        """Save the order to Google Sheets and reply with the result."""
+        # Generate the order ID
         order_id = f"ORD-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
         order_data['order_id'] = order_id
         
@@ -753,7 +753,7 @@ class OrderHandler:
                 )
                 self._reply_text(event, error_message)
         else:
-            # 沒有設定 Google Sheets
+            # Google Sheets is not configured
             success_message = (
                 f"📦 訂單資訊已確認\n\n"
                 f"🆔 訂單編號：{order_id}\n"
@@ -763,7 +763,7 @@ class OrderHandler:
             self._reply_text(event, success_message)
     
     def _save_order_to_sheets_silent(self, order_data: Dict[str, Any], order_index: int = 1) -> bool:
-        """靜默儲存訂單到 Google Sheets（不回覆訊息）"""
+        """Save the order to Google Sheets silently (no reply)."""
         order_id = f"ORD-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
         order_data['order_id'] = order_id
         
@@ -771,10 +771,10 @@ class OrderHandler:
             result = self.sheets_client.append_order(order_data)
             return result['success']
         
-        return True  # 如果沒有設定 Google Sheets，視為成功
+        return True  # Treat as success when Google Sheets is not configured
     
     def _confirm_all_orders_batch(self, event: PostbackEvent) -> None:
-        """批量確認所有訂單（新版）"""
+        """Batch-confirm all orders (new version)."""
         user_id = event.source.user_id
         
         if (user_id not in self.order_sessions or 
@@ -789,13 +789,13 @@ class OrderHandler:
             self._reply_text(event, "沒有找到有效的訂單資料。")
             return
         
-        # 為所有訂單生成編號
+        # Generate IDs for all orders
         for i, order_data in enumerate(orders, 1):
             order_id = f"ORD-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
             order_data['order_id'] = order_id
         
         if self.sheets_client:
-            # 使用批量寫入功能
+            # Use the batch write
             result = self.sheets_client.append_multiple_orders(orders)
             success_count = result.get('total_processed', 0)
             order_ids = result.get('order_ids', [])
@@ -805,22 +805,22 @@ class OrderHandler:
             else:
                 failed_orders = []
         else:
-            # 沒有設定 Google Sheets，視為全部成功
+            # Google Sheets is not configured; treat everything as successful
             success_count = len(orders)
             order_ids = [order['order_id'] for order in orders]
             failed_orders = []
-            result = {'success': True}  # 初始化 result 變數
+            result = {'success': True}  # Initialize the result variable
         
         total_orders = len(orders)
         
         if success_count == total_orders:
-            # 全部成功
+            # All succeeded
             success_message = (
                 f"🎉 批量提交成功！\n\n"
                 f"✅ 已成功建立 {total_orders} 份訂單\n\n"
             )
             
-            # 顯示按工作表分組的資訊
+            # Show the per-sheet grouping info
             if isinstance(result, dict) and result.get('sheet_results'):
                 sheet_results = result.get('sheet_results', {})
                 sheets_used = result.get('sheets_used', [])
@@ -831,7 +831,7 @@ class OrderHandler:
                     sheet_info = sheet_results.get(sheet_name, {})
                     order_count = sheet_info.get('order_count', 0)
                     
-                    # 解析工作表名稱中的日期和星期
+                    # Parse the date and weekday out of the sheet name
                     if '_星期' in sheet_name:
                         date_part, weekday_part = sheet_name.split('_', 1)
                         try:
@@ -857,7 +857,7 @@ class OrderHandler:
             
             self._reply_text(event, success_message)
         else:
-            # 部分失敗
+            # Partial failure
             error_message = (
                 f"⚠️ 批量提交結果\n\n"
                 f"✅ 成功：{success_count}/{total_orders} 份訂單\n"
@@ -867,19 +867,19 @@ class OrderHandler:
             
             self._reply_text(event, error_message)
         
-        # 清除會話狀態
+        # Clear the session state
         if user_id in self.order_sessions:
             del self.order_sessions[user_id]
     
     def _handle_summary_request(self, event: MessageEvent, command_text: str) -> None:
-        """處理匯總請求
+        """Handle a summary request.
         
         Args:
-            event: LINE訊息事件
-            command_text: 完整的指令文字（如 "#匯總 8/27"）
+            event: LINE message event
+            command_text: the full command text (e.g. "#匯總 8/27")
         """
         try:
-            # 解析日期參數
+            # Parse the date argument
             target_date = self._parse_summary_command(command_text)
             
             if not target_date:
@@ -894,7 +894,7 @@ class OrderHandler:
                 )
                 return
             
-            # 檢查是否有 Google Sheets 客戶端
+            # Check that a Google Sheets client is available
             if not self.sheets_client:
                 self._reply_text(event, 
                     "❌ Google Sheets 功能未啟用\n\n"
@@ -903,7 +903,7 @@ class OrderHandler:
                 )
                 return
             
-            # 查詢指定日期的訂單（不再先發送處理中訊息，因為 reply_token 只能用一次）
+            # Query orders for the given date (no "processing" message first, since a reply_token can only be used once)
             query_result = self.sheets_client.get_orders_by_date(target_date)
             
             if not query_result['success']:
@@ -928,7 +928,7 @@ class OrderHandler:
                 )
                 return
             
-            # 生成匯總報告
+            # Generate the summary report
             summary_report = self.summary_generator.generate_summary_report(orders, formatted_date)
             
             if not summary_report['success']:
@@ -939,13 +939,13 @@ class OrderHandler:
                 )
                 return
             
-            # 發送匯總報告（加上處理狀態前綴）
+            # Send the summary report (with a status prefix)
             formatted_report = summary_report.get('formatted_report', '')
             full_message = f"🔍 已完成 {target_date} 的查詢\n\n{formatted_report}"
             
-            # 如果報告太長，直接發送原始報告（因為 reply_token 只能用一次）
+            # If the report is too long, send the bare report instead (a reply_token can only be used once)
             if len(full_message) > 2000:
-                # 太長的話，只發送報告主體
+                # Too long: send only the report body
                 self._reply_text(event, formatted_report)
             else:
                 self._reply_text(event, full_message)
@@ -961,25 +961,25 @@ class OrderHandler:
             )
     
     def _parse_summary_command(self, command_text: str) -> str:
-        """解析匯總指令中的日期參數
+        """Parse the date argument from a summary command.
         
         Args:
-            command_text: 指令文字（如 "#匯總 8/27"）
+            command_text: the command text (e.g. "#匯總 8/27")
             
         Returns:
-            str: 解析出的日期字串，失敗則返回 None
+            str: the parsed date string, or None on failure
         """
         import re
         
-        # 移除指令前綴
+        # Strip the command prefix
         date_part = re.sub(r'^#(匯總|summary)\s*', '', command_text, flags=re.IGNORECASE).strip()
         
         if not date_part:
-            # 沒有提供日期，使用今天
+            # No date given; use today
             from datetime import datetime
             return datetime.now().strftime('%m-%d')
         
-        # 簡單驗證日期格式
+        # Basic date format check
         date_patterns = [
             r'^\d{1,2}/\d{1,2}$',        # 8/27
             r'^\d{1,2}-\d{1,2}$',        # 8-27
@@ -995,15 +995,15 @@ class OrderHandler:
         return None
     
     def _send_long_message_as_push(self, user_id: str, long_text: str) -> None:
-        """發送長訊息（使用 push message 分段發送）
+        """Send a long message (split into several push messages).
         
-        Note: 這個方法需要使用 push message 而不是 reply，
-        因為 reply_token 只能使用一次
+        Note: this method has to use push messages instead of reply,
+        because a reply_token can only be used once.
         
         Args:
-            user_id: 用戶ID
-            long_text: 長文字內容
+            user_id: user ID
+            long_text: the long text
         """
-        # 此方法保留但暫不實作，因為需要 push message 權限
-        # 目前的解決方案是截斷訊息以適應單一回覆
+        # Kept as a stub for now, since it needs push message permission
+        # The current workaround is to truncate the message to fit a single reply
         pass

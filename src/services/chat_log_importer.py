@@ -1,10 +1,10 @@
 """
-聊天紀錄匯入服務
+Chat log import service
 
-流程：聊天紀錄 → DSPy/OpenAI 解析 → 規則驗證與品項對照 → 預覽 → 寫入表單回覆試算表
+Flow: chat log → DSPy/OpenAI parsing → rule validation and item mapping → preview → write to the form-response spreadsheet
 
-刻意分成「預覽」和「寫入」兩步：聊天紀錄的解析不可能百分之百正確，
-有問題的訂單會被標成需人工確認，預設不寫進試算表。
+Preview and write are deliberately separate steps: chat log parsing can never be 100% correct,
+so orders with problems are flagged for manual review and are not written to the spreadsheet by default.
 """
 
 import logging
@@ -36,15 +36,15 @@ logger = logging.getLogger(__name__)
 
 ITEM_JUDGE_BACKENDS = ('gpt', 'shadow', 'jev')
 
-# 推理型模型（o1/o3/o4、gpt-5.x）的 API 參數要求和一般模型不同：
-# 不接受 max_tokens（要用 max_completion_tokens），且 temperature 必須是 1.0。
-# DSPy 2.6 只認得 o1/o3/o4 開頭，gpt-5.x 要自己處理。
+# Reasoning models (o1/o3/o4, gpt-5.x) take different API parameters from regular models:
+# they reject max_tokens (max_completion_tokens is required) and temperature must be 1.0.
+# DSPy 2.6 only recognizes the o1/o3/o4 prefixes, so gpt-5.x has to be handled here.
 REASONING_MODEL_PATTERN = re.compile(r'^(o[134](-mini)?|gpt-5)', re.IGNORECASE)
 REASONING_MAX_TOKENS = 20000
 
 
 def is_reasoning_model(model: str) -> bool:
-    """判斷是否為推理型模型（含供應商前綴時取最後一段）"""
+    """Return whether the model is a reasoning model (uses the last segment when a provider prefix is present)"""
     name = (model or '').split('/')[-1]
     return bool(REASONING_MODEL_PATTERN.match(name))
 
@@ -64,11 +64,11 @@ def build_lm(api_key: str, model: str) -> dspy.LM:
     return dspy.LM(model=model, api_key=api_key, max_tokens=4000, temperature=0.1)
 
 
-# 出貨日的定義集中在 shipping_days.py，稽核工具（/offday）共用同一份
+# Shipping days are defined in one place, shipping_days.py, shared with the audit tool (/offday)
 
 @dataclass
 class ParsedOrder:
-    """一筆解析結果，含要寫入的資料列和需人工確認的原因"""
+    """One parse result: the row to write plus the reasons it needs manual review"""
     order: Dict[str, Any]
     row: List[Any]
     problems: List[str] = field(default_factory=list)
@@ -83,7 +83,7 @@ class ParsedOrder:
 
 
 class ChatLogImporter:
-    """把聊天紀錄轉成表單回覆試算表的資料列"""
+    """Turn a chat log into rows for the form-response spreadsheet"""
 
     def __init__(self, api_key: str, sheet_id: str, credentials_path: str,
                  model: str = 'gpt-5.6-luna', normalize_addresses: bool = True,
@@ -91,7 +91,7 @@ class ChatLogImporter:
         self.model = model
         self.normalize_addresses = normalize_addresses
         self.item_judge_backend, self.item_judge = self._build_item_judge(item_judge_backend)
-        # 必須在建立 DSPy 模組之前 instrument，否則抓不到 LM 呼叫
+        # Must instrument before the DSPy modules are created, otherwise LM calls are not captured
         tracing.setup()
         self._configure_dspy(api_key, model)
         self.parser = ChatLogParser()
@@ -99,34 +99,34 @@ class ChatLogImporter:
         self.sheet_client = FormSheetClient(credentials_path, sheet_id)
 
     def _configure_dspy(self, api_key: str, model: str):
-        """建立語言模型物件
+        """Build the language model object
 
-        不強制走 dspy.settings.configure()——那個只允許最初設定它的執行緒變更，
-        在 Flask 這種每個請求跑在工作執行緒的情境下會直接拋錯。
-        實際呼叫時一律用 dspy.context 套用（見 parse()），兩種情境都成立。
+        Does not rely on dspy.settings.configure(): only the thread that first configured it may change it,
+        so it raises under Flask, where each request runs on a worker thread.
+        Calls always apply the LM via dspy.context instead (see parse()), which works in both cases.
         """
         self.lm = build_lm(api_key, model)
 
         try:
             dspy.settings.configure(lm=self.lm)
         except RuntimeError as error:
-            logger.debug(f'沿用既有 dspy 全域設定，改由 dspy.context 套用：{error}')
+            logger.debug(f'Keeping the existing global dspy settings; applying the LM via dspy.context instead: {error}')
 
     def parse(self, chat_log: str, now: Optional[datetime] = None) -> List[ParsedOrder]:
-        """解析聊天紀錄並產出待寫入的資料列（不寫入試算表）"""
+        """Parse a chat log and produce the rows to write (does not write to the spreadsheet)"""
         moment = now or time_utils.get_current_time()
         current_date = time_utils.format_date_with_weekday(moment, 'standard')
 
-        # 先把 emoji 清掉再送進 LLM：省 token，也避免模型直接抄進姓名地址
+        # Strip emoji before sending to the LLM: saves tokens and keeps the model from copying them into names and addresses
         raw_chars = len(chat_log)
         chat_log = strip_emoji(chat_log)
         removed = raw_chars - len(chat_log)
         if removed:
-            logger.info(f'前處理移除 {removed} 個 emoji／零寬字元')
+            logger.info(f'Pre-processing removed {removed} emoji/zero-width characters')
 
-        # 第一個 trace：LLM 抽取本身。這段是整批共用的，無法歸屬到單一訂單，
-        # 所以獨立成一個 trace，不掛任何 session。
-        # DSPy 的兩段呼叫（抽取 + 完整性複查）由 DSPyInstrumentor 自動記錄在這底下。
+        # First trace: the LLM extraction itself. It is shared by the whole batch and cannot be attributed to a single order,
+        # so it gets its own trace with no session.
+        # DSPy's two calls (extraction + completeness re-check) are recorded under it automatically by DSPyInstrumentor.
         with tracing.trace(
             'chat-log-parse',
             input_data={'chat_log': chat_log, 'current_date': current_date},
@@ -136,7 +136,7 @@ class ChatLogImporter:
         ) as root:
             with dspy.context(lm=self.lm):
                 raw_orders = self.parser(chat_log=chat_log, current_date=current_date)
-            logger.info(f'解析出 {len(raw_orders)} 筆訂單')
+            logger.info(f'Parsed {len(raw_orders)} orders')
             root.update(output={'order_count': len(raw_orders), 'orders': raw_orders})
 
         existing = self.sheet_client.existing_keys()
@@ -148,9 +148,9 @@ class ChatLogImporter:
                 _text(raw.get('receiver_phone')),
                 _text(raw.get('shipping_date')),
             )
-            # 一筆訂單一個 session。session 在 Langfuse 是 trace 層級的屬性，
-            # 所以每筆訂單必須是獨立的 root trace——掛成子 span 的話，
-            # 同一個 trace 只會留下最後一筆的 session，前面的會被覆蓋掉。
+            # One session per order. In Langfuse, session is a trace-level attribute,
+            # so each order must be its own root trace: as child spans,
+            # the trace would keep only the last order's session and overwrite the earlier ones.
             with tracing.trace(
                 'order-build',
                 session_id=key,
@@ -177,22 +177,22 @@ class ChatLogImporter:
         for parsed in results:
             counts[parsed.status] += 1
 
-        # 「可直接寫入的比例」是解析品質最直接的指標，累積起來可以看趨勢
+        # The share of orders that can be written directly is the most direct measure of parse quality; tracked over time it shows the trend
         with tracing.trace('import-summary',
                            input_data={'order_count': len(results)},
                            metadata=counts) as span:
             span.update(output=counts)
             if results:
                 tracing.score('ready_ratio', counts['ready'] / len(results),
-                              comment=f'{counts["ready"]}/{len(results)} 筆無需人工確認')
+                              comment=f'{counts["ready"]}/{len(results)} need no manual review')
 
-        # CLI 跑完就結束行程，不主動送出的話追蹤資料會留在緩衝區裡
+        # The CLI process exits right after running; without an explicit flush the tracing data stays in the buffer
         tracing.flush()
         return results
 
     def _build_order(self, raw: Dict[str, Any], moment: datetime,
                      chat_log: str = '', current_date: str = '') -> ParsedOrder:
-        """把 LLM 輸出轉成資料列，同時累積需人工確認的原因"""
+        """Turn LLM output into a row while collecting the reasons it needs manual review"""
         problems = list(raw.get('issues') or [])
 
         orderer = _text(raw.get('orderer'))
@@ -204,9 +204,9 @@ class ChatLogImporter:
         receiver_address = _text(raw.get('receiver_address'))
         last5 = _text(raw.get('last5'))
 
-        # 地址標準化沿用既有規則庫（區域補全、縣市升格等）。
-        # 注意：升格規則會把「台北市」寫成「臺北市」，和表單既有資料的寫法不同，
-        # 若要和既有資料保持一致，用 --no-normalize-address 關掉。
+        # Address normalization reuses the existing rule base (district completion, county-to-city upgrades, etc.).
+        # Note: the upgrade rules write "台北市" as "臺北市", which differs from how existing form data spells it;
+        # to stay consistent with existing data, turn it off with --no-normalize-address.
         if receiver_address:
             receiver_address = self._normalize_address(receiver_address, problems)
         if sender_address:
@@ -219,7 +219,7 @@ class ChatLogImporter:
 
         shipping_date = self._resolve_shipping_date(raw.get('shipping_date'), problems, moment)
 
-        # 必填欄位檢查
+        # Required-field checks
         if not receiver_name:
             problems.append('缺少收件人')
         if not receiver_phone:
@@ -325,7 +325,7 @@ class ChatLogImporter:
             try:
                 result = self.address_normalizer.normalize_address(address) or address
             except Exception as error:
-                logger.warning(f'地址標準化失敗，保留原文：{error}')
+                logger.warning(f'Address normalization failed, keeping the original text: {error}')
                 problems.append(f'地址未標準化（{address}）')
                 span.update(output=address, metadata={'error': str(error)})
                 return address
@@ -363,8 +363,8 @@ class ChatLogImporter:
             problems.append(f'配送日 {text} 是星期{weekday_name(parsed)}，'
                             f'不是出貨日（僅{shipping_days_text()}）')
 
-        # 出貨日早於今天：多半是模型把「上週三」之類的相對日期算錯年份或算到過去，
-        # 也可能是客人真的在講已經出過的那批。只標記不擋，補登舊訂單時還是寫得進去。
+        # Shipping date before today: usually the model resolved a relative date like "上週三" (last Wednesday) to the wrong year or into the past,
+        # but the customer may really be talking about a batch that already shipped. Flag it without blocking, so back-filled old orders can still be written.
         if parsed.date() < moment.date():
             problems.append(f'配送日 {parsed.strftime("%Y-%m-%d")} 已經過去'
                             f'（今天 {moment.strftime("%Y-%m-%d")}）')
@@ -373,7 +373,7 @@ class ChatLogImporter:
 
     def write(self, parsed_orders: List[ParsedOrder],
               include_review: bool = False) -> Dict[str, Any]:
-        """把訂單寫入試算表，預設只寫沒有問題的那些"""
+        """Write orders to the spreadsheet; by default only those without problems"""
         column_check = self.sheet_client.verify_columns()
         if not column_check['ok']:
             return {
@@ -388,8 +388,8 @@ class ChatLogImporter:
         if not to_write:
             return {'success': True, 'appended_rows': 0, 'skipped': len(parsed_orders)}
 
-        # 每筆訂單各自記一個 span 並掛回自己的 session，
-        # 這樣在 Langfuse 上點開一筆訂單的 session 就能看到「它是什麼時候被寫進去的」
+        # Record one span per order and attach it to that order's own session,
+        # so opening an order's session in Langfuse shows when it was written
         for parsed in to_write:
             with tracing.trace('write-to-sheet',
                                session_id=parsed.session_id,
@@ -422,9 +422,9 @@ def _describe_fields(fields: ItemFields) -> str:
 
 
 def _text(value: Any) -> str:
-    """把 None / 非字串統一成去頭尾空白的字串，並清掉 emoji
+    """Normalize None / non-strings to a stripped string and remove emoji
 
-    模型偶爾會把聊天紀錄裡的 emoji 一起抄進姓名或地址，
-    寫進試算表會變髒資料，也會害重複檢查比對不到，所以每個欄位都清一次。
+    The model occasionally copies emoji from the chat log into names or addresses,
+    which dirties the spreadsheet and breaks duplicate detection, so every field is cleaned.
     """
     return clean_field(value)

@@ -1,5 +1,5 @@
 """
-時間處理工具 - 支援網路時間獲取和日期格式化
+Time utilities - network time fetching and date formatting
 """
 
 import requests
@@ -11,12 +11,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 class TimeUtils:
-    """時間處理工具類"""
+    """Time utility class"""
     
-    # 基準年份 - 強制使用2025年
+    # Base year - force 2025 as the minimum
     BASE_YEAR = 2025
     
-    # 中文星期對照
+    # Chinese weekday names
     WEEKDAY_CN = {
         0: '星期一',
         1: '星期二', 
@@ -30,23 +30,23 @@ class TimeUtils:
     def __init__(self):
         self.cached_time = None
         self.cache_timestamp = None
-        self.cache_duration = 300  # 5分鐘緩存
+        self.cache_duration = 300  # 5-minute cache
         
     def clear_cache(self):
-        """清除時間緩存"""
+        """Clear the time cache"""
         self.cached_time = None
         self.cache_timestamp = None
         logger.info("Time cache cleared")
         
     def get_current_time(self, use_network: bool = True) -> datetime:
         """
-        獲取當前時間
+        Get the current time
         
         Args:
-            use_network: 是否嘗試從網路獲取時間
+            use_network: Whether to try fetching the time from the network
             
         Returns:
-            datetime: 當前時間
+            datetime: The current time
         """
         if use_network:
             network_time = self._get_network_time()
@@ -55,10 +55,10 @@ class TimeUtils:
             elif network_time:
                 logger.warning(f"Network time year {network_time.year} is before base year {self.BASE_YEAR}, using system time")
         
-        # 使用系統時間作為 fallback
+        # Fall back to the system time
         current = datetime.now()
         
-        # 如果系統時間也不對，使用基準年份
+        # If the system time is also wrong, use the base year
         if current.year < self.BASE_YEAR:
             logger.warning(f"System time year {current.year} is before base year {self.BASE_YEAR}, using base year")
             current = current.replace(year=self.BASE_YEAR)
@@ -66,13 +66,13 @@ class TimeUtils:
         return current
     
     def _get_network_time(self) -> Optional[datetime]:
-        """從網路獲取準確時間"""
-        # 檢查緩存
+        """Fetch accurate time from the network"""
+        # Check the cache
         if (self.cached_time and self.cache_timestamp and 
             datetime.now() - self.cache_timestamp < timedelta(seconds=self.cache_duration)):
             return self.cached_time + (datetime.now() - self.cache_timestamp)
         
-        # 嘗試多個時間 API
+        # Try several time APIs
         time_apis = [
             {
                 'url': 'http://worldtimeapi.org/api/timezone/Asia/Taipei',
@@ -90,7 +90,7 @@ class TimeUtils:
                 if response.status_code == 200:
                     parsed_time = api['parser'](response.json())
                     if parsed_time:
-                        # 更新緩存
+                        # Update the cache
                         self.cached_time = parsed_time
                         self.cache_timestamp = datetime.now()
                         logger.info(f"Successfully fetched network time: {parsed_time}")
@@ -103,12 +103,12 @@ class TimeUtils:
         return None
     
     def _parse_worldtimeapi(self, data: Dict[str, Any]) -> Optional[datetime]:
-        """解析 WorldTimeAPI 回應"""
+        """Parse a WorldTimeAPI response"""
         try:
             datetime_str = data.get('datetime', '')
-            # 格式: 2025-08-06T10:30:45.123456+08:00
+            # Format: 2025-08-06T10:30:45.123456+08:00
             if datetime_str:
-                # 移除微秒和時區資訊，簡化解析
+                # Strip microseconds and timezone info to simplify parsing
                 datetime_str = datetime_str.split('.')[0]
                 if '+' in datetime_str:
                     datetime_str = datetime_str.split('+')[0]
@@ -118,7 +118,7 @@ class TimeUtils:
         return None
     
     def _parse_timezonedb(self, data: Dict[str, Any]) -> Optional[datetime]:
-        """解析 TimezoneDB 回應"""
+        """Parse a TimezoneDB response"""
         try:
             timestamp = data.get('timestamp')
             if timestamp:
@@ -129,14 +129,14 @@ class TimeUtils:
     
     def format_date_with_weekday(self, date_obj: datetime, format_type: str = 'standard') -> str:
         """
-        格式化日期並包含星期
+        Format a date including its weekday
         
         Args:
-            date_obj: 日期物件
-            format_type: 格式類型 ('standard', 'short', 'sheet_name')
+            date_obj: Date object
+            format_type: Format type ('standard', 'short', 'sheet_name')
             
         Returns:
-            str: 格式化後的日期字串
+            str: The formatted date string
         """
         weekday = self.WEEKDAY_CN[date_obj.weekday()]
         
@@ -151,13 +151,13 @@ class TimeUtils:
     
     def parse_shipping_date(self, date_str: str) -> Optional[datetime]:
         """
-        解析出貨日期字串
+        Parse a shipping date string
         
         Args:
-            date_str: 日期字串 (可能格式: YYYY-MM-DD, MM-DD, 明天, 後天等)
+            date_str: Date string (possible formats: YYYY-MM-DD, MM-DD, 明天 (tomorrow), 後天 (day after tomorrow), etc.)
             
         Returns:
-            datetime or None: 解析後的日期物件
+            datetime or None: The parsed date object
         """
         if not date_str or date_str.strip() == '':
             return None
@@ -166,21 +166,21 @@ class TimeUtils:
         current_time = self.get_current_time()
         
         try:
-            # 標準日期格式: YYYY-MM-DD
+            # Standard date format: YYYY-MM-DD
             if len(date_str) == 10 and '-' in date_str:
                 return datetime.strptime(date_str, '%Y-%m-%d')
             
-            # 短日期格式: MM-DD
+            # Short date format: MM-DD
             elif len(date_str) == 5 and '-' in date_str:
                 month, day = map(int, date_str.split('-'))
-                year = self.BASE_YEAR  # 使用基準年份2025年
-                # 如果日期已經過了，使用明年
+                year = self.BASE_YEAR  # Use the base year (2025)
+                # If the date has already passed, use next year
                 test_date = datetime(year, month, day)
                 if test_date < current_time:
                     test_date = datetime(year + 1, month, day)
                 return test_date
             
-            # 相對日期
+            # Relative dates
             elif date_str in ['今天', '今日']:
                 return current_time
             elif date_str in ['明天', '明日']:
@@ -200,15 +200,15 @@ class TimeUtils:
     
     def get_date_range_for_week(self, target_date: datetime) -> Dict[str, datetime]:
         """
-        獲取指定日期所在週的日期範圍
+        Get the date range of the week containing the given date
         
         Args:
-            target_date: 目標日期
+            target_date: Target date
             
         Returns:
-            dict: 包含週開始和結束日期
+            dict: Containing the week's start and end dates
         """
-        # 找到週一
+        # Find Monday
         days_since_monday = target_date.weekday()
         week_start = target_date - timedelta(days=days_since_monday)
         week_end = week_start + timedelta(days=6)
@@ -221,13 +221,14 @@ class TimeUtils:
     
     def validate_shipping_date(self, date_str: str) -> Dict[str, Any]:
         """
-        驗證出貨日期
+        Validate a shipping date
         
         Args:
-            date_str: 出貨日期字串
+            date_str: Shipping date string
             
         Returns:
-            dict: 驗證結果
+            dict: Validation result. The 'message' values are kept in Chinese
+            because they may be shown to shop staff.
         """
         if not date_str:
             return {
@@ -249,7 +250,7 @@ class TimeUtils:
         
         current_time = self.get_current_time()
         
-        # 檢查日期是否在過去
+        # Check whether the date is in the past
         if parsed_date.date() < current_time.date():
             return {
                 'is_valid': False,
@@ -258,7 +259,7 @@ class TimeUtils:
                 'message': '出貨日期不能是過去的日期'
             }
         
-        # 檢查是否太遠的未來（例如超過1年）
+        # Check whether it is too far in the future (e.g. more than 1 year)
         if (parsed_date - current_time).days > 365:
             return {
                 'is_valid': False,
@@ -274,5 +275,5 @@ class TimeUtils:
             'message': '日期格式正確'
         }
 
-# 全域時間工具實例
+# Global time utility instance
 time_utils = TimeUtils()

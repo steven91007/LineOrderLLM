@@ -1,92 +1,94 @@
-# Google Sheets API 使用指南
+# Google Sheets API Guide
 
-## 概述
+## Overview
 
-此專案提供了完整的 Google Sheets API 整合方案，包括：
-- **GoogleSheetsClient**: 核心客戶端類別
-- **範例程式**: 展示各種使用方法
-- **測試程式**: 完整的功能測試套件
+This project provides a complete Google Sheets API integration, including:
+- **GoogleSheetsClient**: the core client class
+- **Example program**: demonstrates the various ways to use it
+- **Test program**: a full functional test suite
 
-## 快速開始
+## Quick Start
 
-### 1. 環境設定
+### 1. Environment Setup
 
-#### 必要環境變數
-在 `.env` 檔案中設定以下變數：
+#### Required environment variables
+Set the following variables in your `.env` file:
 
 ```bash
-# Google Sheets 設定
+# Google Sheets settings
 GOOGLE_SHEETS_CREDENTIALS_PATH=/path/to/your/credentials.json
 GOOGLE_SHEETS_ID=your_spreadsheet_id_here
 ```
 
-#### 取得 Google Sheets 憑證
+#### Getting Google Sheets credentials
 
-1. **建立 Google Cloud 專案**
-   - 前往 [Google Cloud Console](https://console.cloud.google.com/)
-   - 建立新專案或選擇現有專案
+1. **Create a Google Cloud project**
+   - Go to the [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
 
-2. **啟用 Google Sheets API**
-   - 在 API 與服務 > 程式庫中搜尋 "Google Sheets API"
-   - 點擊啟用
+2. **Enable the Google Sheets API**
+   - Under APIs & Services > Library, search for "Google Sheets API"
+   - Click Enable
 
-3. **建立服務帳戶**
-   - 前往 API 與服務 > 憑證
-   - 點擊 "建立憑證" > "服務帳戶"
-   - 填寫服務帳戶詳細資料
-   - 下載 JSON 憑證檔案
+3. **Create a service account**
+   - Go to APIs & Services > Credentials
+   - Click "Create credentials" > "Service account"
+   - Fill in the service account details
+   - Download the JSON credentials file
 
-4. **設定試算表權限**
-   - 建立或開啟 Google Sheets 試算表
-   - 點擊右上角 "共用" 按鈕
-   - 新增服務帳戶的電子郵件地址（在憑證檔案中的 `client_email`）
-   - 給予 "編輯者" 權限
+4. **Set spreadsheet permissions**
+   - Create or open a Google Sheets spreadsheet
+   - Click the "Share" button in the top-right corner
+   - Add the service account's email address (the `client_email` in the credentials file)
+   - Grant it "Editor" permission
 
-5. **取得試算表 ID**
-   - 從試算表 URL 中複製 ID
-   - URL 格式：`https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid=0`
+5. **Get the spreadsheet ID**
+   - Copy the ID from the spreadsheet URL
+   - URL format: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid=0`
 
-### 2. 安裝相依套件
+### 2. Install Dependencies
 
 ```bash
 pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client python-dotenv
 ```
 
-### 3. 驗證設定
+### 3. Validate the Setup
 
-執行設定驗證來確認所有配置正確：
+Run the setup validation to confirm everything is configured correctly:
 
 ```bash
 python test_google_sheets_api.py --validation-only
 ```
 
-## 使用方法
+## Usage
 
-### 基本使用
+### Basic usage
 
 ```python
 from src.utils.google_sheets_client import GoogleSheetsClient
 import os
 from dotenv import load_dotenv
 
-# 載入環境變數
+# Load environment variables
 load_dotenv()
 
-# 初始化客戶端
+# Initialize the client
 client = GoogleSheetsClient(
     credentials_path=os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH'),
     sheet_id=os.getenv('GOOGLE_SHEETS_ID')
 )
 
-# 測試連接
+# Test the connection
 result = client.test_connection()
 if result['success']:
-    print(f"連接成功：{result['message']}")
+    print(f"Connected: {result['message']}")
 else:
-    print(f"連接失敗：{result['error']}")
+    print(f"Connection failed: {result['error']}")
 ```
 
-### 新增單一訂單
+### Adding a single order
+
+Sample values are Chinese because that is what the sheet stores (e.g. `'寄件人姓名'` = sender name placeholder, `'收件人姓名'` = receiver name placeholder, `'待處理'` = "pending" status, `'備註資訊'` = notes placeholder).
 
 ```python
 order_data = {
@@ -107,325 +109,331 @@ order_data = {
 
 result = client.append_order(order_data)
 if result['success']:
-    print(f"訂單新增成功，訂單編號：{result['order_id']}")
+    print(f"Order added, order ID: {result['order_id']}")
 else:
-    print(f"訂單新增失敗：{result['error']}")
+    print(f"Failed to add order: {result['error']}")
 ```
 
-### 批量新增訂單
+### Adding orders in bulk
 
 ```python
-orders_data = [order1, order2, order3]  # 訂單列表
+orders_data = [order1, order2, order3]  # list of orders
 
 result = client.append_multiple_orders(orders_data)
 if result['success']:
-    print(f"批量新增成功，處理了 {result['total_processed']} 筆訂單")
-    print(f"訂單編號：{result['order_ids']}")
+    print(f"Bulk add succeeded, processed {result['total_processed']} orders")
+    print(f"Order IDs: {result['order_ids']}")
 else:
-    print(f"批量新增失敗：{result['error']}")
+    print(f"Bulk add failed: {result['error']}")
 ```
 
-### 獲取最近訂單
+### Fetching recent orders
 
 ```python
 result = client.get_recent_orders(limit=10)
 if result['success']:
     orders = result['orders']
-    print(f"找到 {len(orders)} 筆最近訂單")
+    print(f"Found {len(orders)} recent orders")
     for order in orders:
         print(f"- {order['order_id']}: {order['receiver_name']}")
 else:
-    print(f"獲取訂單失敗：{result['error']}")
+    print(f"Failed to fetch orders: {result['error']}")
 ```
 
-## 執行範例程式
+## Running the Example Program
 
-### 完整功能展示
+### Full feature demo
 
 ```bash
 python examples/google_sheets_api_example.py
 ```
 
-這個範例程式會：
-1. 驗證環境設定
-2. 測試連接
-3. 建立試算表標題（如果不存在）
-4. 新增單一範例訂單
-5. 批量新增多筆範例訂單
-6. 獲取最近的訂單記錄
+This example program will:
+1. Validate the environment setup
+2. Test the connection
+3. Create the spreadsheet header row (if it does not exist)
+4. Add a single sample order
+5. Add several sample orders in bulk
+6. Fetch the most recent order records
 
-### 範例輸出
+### Sample output
+
+(`訂單管理系統` is the spreadsheet's title, "Order Management System".)
 
 ```
-🚀 Google Sheets API 範例程式
-這個程式將示範 GoogleSheetsClient 的各種功能
-使用憑證檔案：/path/to/credentials.json
-使用試算表 ID：your_spreadsheet_id
+🚀 Google Sheets API example program
+This program demonstrates the various features of GoogleSheetsClient
+Using credentials file: /path/to/credentials.json
+Using spreadsheet ID: your_spreadsheet_id
 
 ==================================================
- 設定驗證
+ Setup validation
 ==================================================
-整體狀態：healthy
+Overall status: healthy
 
-檢查結果：
-  ✅ credentials_file：憑證檔案存在
-  ✅ service_init：Google Sheets 服務初始化成功
-  ✅ connection：成功連接到試算表: 訂單管理系統
-    - spreadsheet_title：訂單管理系統
-    - sheet_count：1
-  ✅ headers：標題行設定成功
-
-==================================================
- 連接測試
-==================================================
-✅ 連接測試 成功！
-   訊息：成功連接到試算表: 訂單管理系統
-   試算表標題：訂單管理系統
-   工作表數量：1
-
-... 更多輸出 ...
+Check results:
+  ✅ credentials_file: credentials file exists
+  ✅ service_init: Google Sheets service initialized successfully
+  ✅ connection: connected to spreadsheet: 訂單管理系統
+    - spreadsheet_title: 訂單管理系統
+    - sheet_count: 1
+  ✅ headers: header row set up successfully
 
 ==================================================
-範例程式執行完成
+ Connection test
 ==================================================
-🎉 所有功能示範完成！
-您可以查看 Google Sheets 確認資料是否正確新增
+✅ Connection test succeeded!
+   Message: connected to spreadsheet: 訂單管理系統
+   Spreadsheet title: 訂單管理系統
+   Sheet count: 1
+
+... more output ...
+
+==================================================
+Example program finished
+==================================================
+🎉 All feature demos completed!
+You can check Google Sheets to confirm the data was added correctly
 ```
 
-## 執行測試程式
+## Running the Test Program
 
-### 完整測試套件
+### Full test suite
 
 ```bash
 python test_google_sheets_api.py
 ```
 
-### 測試選項
+### Test options
 
 ```bash
-# 僅執行設定驗證
+# Run setup validation only
 python test_google_sheets_api.py --validation-only
 
-# 詳細輸出
+# Verbose output
 python test_google_sheets_api.py -v
 
-# 快速測試（跳過實際寫入）
+# Quick test (skips actual writes)
 python test_google_sheets_api.py --quick
 ```
 
-### 測試項目
+### Test cases
 
-測試程式包含以下測試項目：
+The test program includes the following tests:
 
-1. **環境設定測試** - 檢查環境變數和憑證檔案
-2. **客戶端初始化測試** - 驗證 GoogleSheetsClient 正確初始化
-3. **設定驗證測試** - 測試 `validate_setup()` 功能
-4. **連接測試** - 測試 `test_connection()` 功能
-5. **範例資料建立測試** - 驗證測試資料格式
-6. **標題建立測試** - 測試 `create_sheet_if_not_exists()` 功能
-7. **單一訂單新增測試** - 測試 `append_order()` 功能
-8. **批量訂單新增測試** - 測試 `append_multiple_orders()` 功能
-9. **資料讀取測試** - 測試 `get_recent_orders()` 功能
-10. **錯誤處理測試** - 測試各種錯誤情況
-11. **資料格式化測試** - 測試 `_format_items()` 功能
+1. **Environment setup test** - checks environment variables and the credentials file
+2. **Client initialization test** - verifies GoogleSheetsClient initializes correctly
+3. **Setup validation test** - tests `validate_setup()`
+4. **Connection test** - tests `test_connection()`
+5. **Sample data creation test** - verifies the test data format
+6. **Header creation test** - tests `create_sheet_if_not_exists()`
+7. **Single order append test** - tests `append_order()`
+8. **Bulk order append test** - tests `append_multiple_orders()`
+9. **Data read test** - tests `get_recent_orders()`
+10. **Error handling test** - tests various error conditions
+11. **Data formatting test** - tests `_format_items()`
 
-## API 參考
+## API Reference
 
 ### GoogleSheetsClient
 
-#### 初始化
+#### Initialization
 
 ```python
 GoogleSheetsClient(credentials_path: str, sheet_id: str)
 ```
 
-- `credentials_path`: Google Service Account 憑證檔案路徑
-- `sheet_id`: Google Sheets 試算表 ID
+- `credentials_path`: path to the Google Service Account credentials file
+- `sheet_id`: the Google Sheets spreadsheet ID
 
-#### 主要方法
+#### Main methods
 
 ##### `test_connection() -> Dict[str, Any]`
-測試與 Google Sheets 的連接
+Tests the connection to Google Sheets.
 
-**回傳值：**
+**Returns:**
 ```python
 {
     'success': bool,
-    'spreadsheet_title': str,  # 試算表標題
-    'sheet_count': int,        # 工作表數量
-    'message': str,            # 成功訊息
-    'error': str               # 錯誤訊息（失敗時）
+    'spreadsheet_title': str,  # spreadsheet title
+    'sheet_count': int,        # number of sheets (tabs)
+    'message': str,            # success message
+    'error': str               # error message (on failure)
 }
 ```
 
 ##### `validate_setup() -> Dict[str, Any]`
-驗證完整的設定狀態
+Validates the complete setup state.
 
-**回傳值：**
+**Returns:**
 ```python
 {
     'overall_status': str,     # 'healthy', 'partial', 'failed'
-    'checks': dict,            # 各項檢查結果
-    'recommendations': list    # 建議事項
+    'checks': dict,            # results of each check
+    'recommendations': list    # recommendations
 }
 ```
 
 ##### `append_order(order_data: Dict[str, Any]) -> Dict[str, Any]`
-新增單一訂單到試算表
+Appends a single order to the spreadsheet.
 
-**參數：**
+**Parameters:**
 ```python
 order_data = {
-    'order_id': str,           # 訂單編號
-    'sender_name': str,        # 寄件人姓名（選填）
-    'sender_phone': str,       # 寄件人電話（選填）
-    'receiver_name': str,      # 收件人姓名
-    'receiver_phone': str,     # 收件人電話
-    'shipping_address': str,   # 收件地址
-    'shipping_date': str,      # 預計發貨日期（選填）
-    'items': List[Dict],       # 商品清單
-    'status': str,             # 訂單狀態（選填，預設：待處理）
-    'notes': str               # 備註（選填）
+    'order_id': str,           # order ID
+    'sender_name': str,        # sender name (optional)
+    'sender_phone': str,       # sender phone (optional)
+    'receiver_name': str,      # receiver name
+    'receiver_phone': str,     # receiver phone
+    'shipping_address': str,   # shipping address
+    'shipping_date': str,      # expected shipping date (optional)
+    'items': List[Dict],       # item list
+    'status': str,             # order status (optional, default: 待處理 "pending")
+    'notes': str               # notes (optional)
 }
 ```
 
-**商品清單格式：**
+**Item list format:**
 ```python
 items = [
-    {'name': '商品名稱', 'quantity': 數量},
+    {'name': 'item name', 'quantity': quantity},
     ...
 ]
 ```
 
-**回傳值：**
+**Returns:**
 ```python
 {
     'success': bool,
-    'updated_rows': int,       # 更新的行數
-    'updated_cells': int,      # 更新的儲存格數
-    'order_id': str,           # 訂單編號
-    'error': str               # 錯誤訊息（失敗時）
+    'updated_rows': int,       # number of rows updated
+    'updated_cells': int,      # number of cells updated
+    'order_id': str,           # order ID
+    'error': str               # error message (on failure)
 }
 ```
 
 ##### `append_multiple_orders(orders_data: List[Dict[str, Any]]) -> Dict[str, Any]`
-批量新增多筆訂單到試算表
+Appends multiple orders to the spreadsheet in bulk.
 
-**參數：**
-- `orders_data`: 訂單資料列表，每個元素格式同 `append_order`
+**Parameters:**
+- `orders_data`: list of order data; each element has the same format as for `append_order`
 
-**回傳值：**
+**Returns:**
 ```python
 {
     'success': bool,
-    'total_processed': int,    # 處理的訂單數量
-    'updated_rows': int,       # 更新的行數
-    'updated_cells': int,      # 更新的儲存格數
-    'order_ids': List[str],    # 所有訂單編號
-    'error': str               # 錯誤訊息（失敗時）
+    'total_processed': int,    # number of orders processed
+    'updated_rows': int,       # number of rows updated
+    'updated_cells': int,      # number of cells updated
+    'order_ids': List[str],    # all order IDs
+    'error': str               # error message (on failure)
 }
 ```
 
 ##### `get_recent_orders(limit: int = 10) -> Dict[str, Any]`
-獲取最近的訂單記錄
+Fetches the most recent order records.
 
-**參數：**
-- `limit`: 獲取的訂單數量限制
+**Parameters:**
+- `limit`: maximum number of orders to fetch
 
-**回傳值：**
+**Returns:**
 ```python
 {
     'success': bool,
-    'orders': List[Dict],      # 訂單列表
-    'error': str               # 錯誤訊息（失敗時）
+    'orders': List[Dict],      # list of orders
+    'error': str               # error message (on failure)
 }
 ```
 
-**訂單格式：**
+**Order format:**
 ```python
 order = {
-    'order_time': str,         # 訂單時間
-    'order_id': str,           # 訂單編號
-    'sender_name': str,        # 寄件人姓名
-    'sender_phone': str,       # 寄件人電話
-    'receiver_name': str,      # 收件人姓名
-    'receiver_phone': str,     # 收件人電話
-    'items': str,              # 商品明細（已格式化）
-    'shipping_date': str,      # 預計發貨日期
-    'shipping_address': str,   # 收件地址
-    'status': str,             # 訂單狀態
-    'notes': str               # 備註
+    'order_time': str,         # order time
+    'order_id': str,           # order ID
+    'sender_name': str,        # sender name
+    'sender_phone': str,       # sender phone
+    'receiver_name': str,      # receiver name
+    'receiver_phone': str,     # receiver phone
+    'items': str,              # item details (already formatted)
+    'shipping_date': str,      # expected shipping date
+    'shipping_address': str,   # shipping address
+    'status': str,             # order status
+    'notes': str               # notes
 }
 ```
 
 ##### `create_sheet_if_not_exists() -> bool`
-確保試算表存在並設定正確的標題行
+Ensures the spreadsheet exists and has the correct header row.
 
-**回傳值：**
-- `True`: 設定成功
-- `False`: 設定失敗
+**Returns:**
+- `True`: setup succeeded
+- `False`: setup failed
 
-## 試算表格式
+## Spreadsheet Format
 
-### 標題行（第一行）
+### Header row (first row)
+
+The headers are written to the sheet in Chinese exactly as shown. English meanings: order time, order ID, sender, sender phone, receiver, receiver phone, item details, expected shipping date, shipping address, order status, notes.
 
 | A | B | C | D | E | F | G | H | I | J | K |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 訂單時間 | 訂單編號 | 寄件人 | 寄件人電話 | 收件人 | 收件人電話 | 商品明細 | 預計發貨日 | 收件地址 | 訂單狀態 | 備註 |
 
-### 資料行範例
+### Sample data row
+
+(`待處理` = "pending", `急件` = "urgent".)
 
 | 訂單時間 | 訂單編號 | 寄件人 | 寄件人電話 | 收件人 | 收件人電話 | 商品明細 | 預計發貨日 | 收件地址 | 訂單狀態 | 備註 |
 |---------|---------|--------|-----------|--------|-----------|----------|-----------|----------|----------|------|
 | 2025-08-04 14:30:15 | ORD-20250804-001 | 王小明 | 0912-345-678 | 李小華 | 0987-654-321 | 18A禮盒 x 2, 16A蛋糕 x 1 | 2025-08-07 | 台北市信義區信義路五段7號 | 待處理 | 急件 |
 
-## 常見問題
+## FAQ
 
-### Q: 為什麼連接測試失敗？
+### Q: Why does the connection test fail?
 
-**A: 可能的原因：**
-1. **憑證檔案路徑錯誤** - 檢查 `GOOGLE_SHEETS_CREDENTIALS_PATH` 環境變數
-2. **試算表 ID 錯誤** - 檢查 `GOOGLE_SHEETS_ID` 環境變數
-3. **權限不足** - 確保服務帳戶有試算表的編輯權限
-4. **API 未啟用** - 確保 Google Sheets API 已在 Google Cloud Console 中啟用
+**A: Possible causes:**
+1. **Wrong credentials file path** - check the `GOOGLE_SHEETS_CREDENTIALS_PATH` environment variable
+2. **Wrong spreadsheet ID** - check the `GOOGLE_SHEETS_ID` environment variable
+3. **Insufficient permissions** - make sure the service account has edit access to the spreadsheet
+4. **API not enabled** - make sure the Google Sheets API is enabled in the Google Cloud Console
 
-### Q: 如何檢查服務帳戶權限？
+### Q: How do I check the service account's permissions?
 
-**A: 檢查步驟：**
-1. 開啟 Google Sheets 試算表
-2. 點擊右上角 "共用" 按鈕
-3. 確認服務帳戶電子郵件地址在共用清單中
-4. 確認權限設定為 "編輯者" 或 "擁有者"
+**A: Steps:**
+1. Open the Google Sheets spreadsheet
+2. Click the "Share" button in the top-right corner
+3. Confirm the service account's email address is in the sharing list
+4. Confirm its permission is set to "Editor" or "Owner"
 
-### Q: 新增訂單時出現權限錯誤怎麼辦？
+### Q: What if I get a permission error when adding orders?
 
-**A: 解決方法：**
-1. 使用 `validate_setup()` 檢查所有設定
-2. 確認服務帳戶有寫入權限
-3. 檢查憑證檔案是否有效
-4. 嘗試重新下載憑證檔案
+**A: Fixes:**
+1. Use `validate_setup()` to check all settings
+2. Confirm the service account has write access
+3. Check that the credentials file is valid
+4. Try downloading the credentials file again
 
-### Q: 如何自訂試算表格式？
+### Q: How do I customize the spreadsheet format?
 
-**A: 自訂方法：**
-1. 修改 `create_sheet_if_not_exists()` 方法中的標題定義
-2. 調整 `append_order()` 和 `append_multiple_orders()` 中的資料欄位順序
-3. 更新 `get_recent_orders()` 中的資料解析邏輯
+**A: To customize:**
+1. Change the header definition in the `create_sheet_if_not_exists()` method
+2. Adjust the column order of the data in `append_order()` and `append_multiple_orders()`
+3. Update the parsing logic in `get_recent_orders()`
 
-### Q: 如何處理大量資料？
+### Q: How do I handle large amounts of data?
 
-**A: 效能建議：**
-1. 使用 `append_multiple_orders()` 進行批量操作
-2. 避免頻繁的單筆新增操作
-3. 設定適當的 `limit` 參數讀取資料
-4. 考慮使用分頁或分批處理機制
+**A: Performance tips:**
+1. Use `append_multiple_orders()` for bulk operations
+2. Avoid frequent single-row appends
+3. Set an appropriate `limit` when reading data
+4. Consider pagination or batch processing
 
-## 授權與支援
+## License and Support
 
-此專案遵循專案主要授權條款。如有問題或建議，請透過專案 Issue 系統回報。
+This project follows the project's main license terms. For questions or suggestions, please report them through the project's issue tracker.
 
-## 更新記錄
+## Changelog
 
-- **2025-08-04**: 初始版本發布，包含完整的 Google Sheets API 整合
-- 功能包含：單一/批量訂單新增、資料讀取、連接測試、設定驗證
-- 提供完整的範例程式和測試套件
+- **2025-08-04**: Initial release with full Google Sheets API integration
+- Features: single/bulk order appends, data reads, connection testing, setup validation
+- Includes a complete example program and test suite

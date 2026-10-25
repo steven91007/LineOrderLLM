@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Google Sheets API 範例程式
+Google Sheets API example program
 
-此範例展示如何使用 GoogleSheetsClient 進行各種操作：
-- 測試連接
-- 新增單一訂單
-- 批量新增訂單  
-- 獲取最近訂單
-- 驗證設定狀態
+This example shows how to use GoogleSheetsClient for various operations:
+- Test the connection
+- Add a single order
+- Add orders in batch
+- Get recent orders
+- Validate the setup
 
-使用前請確保：
-1. 已設定 Google Service Account 憑證檔案
-2. 已建立 Google Sheets 並分享給服務帳戶
-3. 已在 .env 檔案中設定相關環境變數
+Before running, make sure:
+1. The Google Service Account credentials file is set up
+2. A Google Sheet has been created and shared with the service account
+3. The relevant environment variables are set in the .env file
 """
 
 import os
@@ -20,39 +20,39 @@ import sys
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-# 將專案根目錄加入 Python 路徑
+# Add the project root to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.google_sheets_client import GoogleSheetsClient
 from dotenv import load_dotenv
 
-# 載入環境變數
+# Load environment variables
 load_dotenv()
 
 def print_section(title: str):
-    """列印區段標題"""
+    """Print a section title."""
     print(f"\n{'='*50}")
     print(f" {title}")
     print(f"{'='*50}")
 
 def print_result(result: Dict[str, Any], operation: str):
-    """格式化輸出結果"""
+    """Print a formatted result."""
     if result.get('success'):
-        print(f"✅ {operation} 成功！")
+        print(f"✅ {operation} succeeded!")
         if 'message' in result:
-            print(f"   訊息：{result['message']}")
+            print(f"   Message: {result['message']}")
         if 'updated_rows' in result:
-            print(f"   更新列數：{result['updated_rows']}")
+            print(f"   Rows updated: {result['updated_rows']}")
         if 'total_processed' in result:
-            print(f"   處理數量：{result['total_processed']}")
+            print(f"   Processed: {result['total_processed']}")
     else:
-        print(f"❌ {operation} 失敗！")
-        print(f"   錯誤：{result.get('error', '未知錯誤')}")
+        print(f"❌ {operation} failed!")
+        print(f"   Error: {result.get('error', 'Unknown error')}")
         if 'details' in result:
-            print(f"   詳細資訊：{result['details']}")
+            print(f"   Details: {result['details']}")
 
 def create_sample_order(order_id: str = None) -> Dict[str, Any]:
-    """建立範例訂單資料"""
+    """Build sample order data."""
     if not order_id:
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         order_id = f"DEMO-{timestamp}"
@@ -69,12 +69,12 @@ def create_sample_order(order_id: str = None) -> Dict[str, Any]:
             {'name': '18A禮盒', 'quantity': 2},
             {'name': '16A蛋糕', 'quantity': 1}
         ],
-        'status': '待處理',
-        'notes': '這是一個範例訂單'
+        'status': '待處理',  # sample data ("pending")
+        'notes': '這是一個範例訂單'  # sample data ("this is a sample order")
     }
 
 def create_sample_batch_orders(count: int = 3) -> List[Dict[str, Any]]:
-    """建立批量範例訂單資料"""
+    """Build sample batch order data."""
     orders = []
     base_timestamp = datetime.now()
     
@@ -102,144 +102,144 @@ def create_sample_batch_orders(count: int = 3) -> List[Dict[str, Any]]:
     return orders
 
 def demo_validation(client: GoogleSheetsClient):
-    """示範設定驗證功能"""
-    print_section("設定驗證")
+    """Demonstrate setup validation."""
+    print_section("Setup validation")
     
     validation_result = client.validate_setup()
     
-    print(f"整體狀態：{validation_result['overall_status']}")
-    print("\n檢查結果：")
+    print(f"Overall status: {validation_result['overall_status']}")
+    print("\nCheck results:")
     
     for check_name, check_result in validation_result['checks'].items():
         status_icon = "✅" if check_result['status'] == 'pass' else "❌"
-        print(f"  {status_icon} {check_name}：{check_result['message']}")
+        print(f"  {status_icon} {check_name}: {check_result['message']}")
         
         if 'details' in check_result and check_result['details']:
             for key, value in check_result['details'].items():
-                print(f"    - {key}：{value}")
+                print(f"    - {key}: {value}")
     
     if validation_result['recommendations']:
-        print("\n建議：")
+        print("\nRecommendations:")
         for recommendation in validation_result['recommendations']:
             print(f"  💡 {recommendation}")
 
 def demo_connection_test(client: GoogleSheetsClient):
-    """示範連接測試功能"""
-    print_section("連接測試")
+    """Demonstrate the connection test."""
+    print_section("Connection test")
     
     result = client.test_connection()
-    print_result(result, "連接測試")
+    print_result(result, "Connection test")
     
     if result.get('success'):
-        print(f"   試算表標題：{result.get('spreadsheet_title')}")
-        print(f"   工作表數量：{result.get('sheet_count')}")
+        print(f"   Spreadsheet title: {result.get('spreadsheet_title')}")
+        print(f"   Worksheet count: {result.get('sheet_count')}")
 
 def demo_single_order(client: GoogleSheetsClient):
-    """示範單一訂單新增功能"""
-    print_section("單一訂單新增")
+    """Demonstrate adding a single order."""
+    print_section("Add single order")
     
     sample_order = create_sample_order()
-    print("範例訂單資料：")
-    print(f"  訂單編號：{sample_order['order_id']}")
-    print(f"  收件人：{sample_order['receiver_name']}")
-    print(f"  地址：{sample_order['shipping_address']}")
+    print("Sample order data:")
+    print(f"  Order ID: {sample_order['order_id']}")
+    print(f"  Receiver: {sample_order['receiver_name']}")
+    print(f"  Address: {sample_order['shipping_address']}")
     items_str = ', '.join([f"{item['name']} x{item['quantity']}" for item in sample_order['items']])
-    print(f"  商品：{items_str}")
+    print(f"  Items: {items_str}")
     
     result = client.append_order(sample_order)
-    print_result(result, "單一訂單新增")
+    print_result(result, "Add single order")
 
 def demo_batch_orders(client: GoogleSheetsClient):
-    """示範批量訂單新增功能"""
-    print_section("批量訂單新增")
+    """Demonstrate adding orders in batch."""
+    print_section("Add batch orders")
     
     sample_orders = create_sample_batch_orders(3)
-    print(f"準備新增 {len(sample_orders)} 份訂單：")
+    print(f"Adding {len(sample_orders)} orders:")
     
     for i, order in enumerate(sample_orders, 1):
         print(f"  {i}. {order['order_id']} - {order['receiver_name']}")
     
     result = client.append_multiple_orders(sample_orders)
-    print_result(result, "批量訂單新增")
+    print_result(result, "Add batch orders")
     
     if result.get('success') and result.get('order_ids'):
-        print("   已新增的訂單編號：")
+        print("   Added order IDs:")
         for order_id in result['order_ids']:
             print(f"     - {order_id}")
 
 def demo_get_recent_orders(client: GoogleSheetsClient):
-    """示範獲取最近訂單功能"""
-    print_section("獲取最近訂單")
+    """Demonstrate fetching recent orders."""
+    print_section("Get recent orders")
     
     result = client.get_recent_orders(limit=5)
-    print_result(result, "獲取最近訂單")
+    print_result(result, "Get recent orders")
     
     if result.get('success'):
         orders = result.get('orders', [])
         if orders:
-            print(f"   找到 {len(orders)} 份最近訂單：")
+            print(f"   Found {len(orders)} recent orders:")
             for i, order in enumerate(orders, 1):
                 print(f"     {i}. {order['order_id']} - {order['receiver_name']} ({order['order_time']})")
         else:
-            print("   目前沒有訂單資料")
+            print("   No order data yet")
 
 def main():
-    """主程式"""
-    print("🚀 Google Sheets API 範例程式")
-    print("這個程式將示範 GoogleSheetsClient 的各種功能")
+    """Main program."""
+    print("🚀 Google Sheets API example program")
+    print("This program demonstrates the features of GoogleSheetsClient")
     
-    # 檢查環境變數
+    # Check environment variables
     credentials_path = os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH')
     sheet_id = os.getenv('GOOGLE_SHEETS_ID')
     
     if not credentials_path:
-        print("❌ 錯誤：未設定 GOOGLE_SHEETS_CREDENTIALS_PATH 環境變數")
-        print("請在 .env 檔案中設定：GOOGLE_SHEETS_CREDENTIALS_PATH=path/to/credentials.json")
+        print("❌ Error: GOOGLE_SHEETS_CREDENTIALS_PATH environment variable is not set")
+        print("Set it in the .env file: GOOGLE_SHEETS_CREDENTIALS_PATH=path/to/credentials.json")
         return
     
     if not sheet_id:
-        print("❌ 錯誤：未設定 GOOGLE_SHEETS_ID 環境變數")
-        print("請在 .env 檔案中設定：GOOGLE_SHEETS_ID=your_spreadsheet_id")
+        print("❌ Error: GOOGLE_SHEETS_ID environment variable is not set")
+        print("Set it in the .env file: GOOGLE_SHEETS_ID=your_spreadsheet_id")
         return
     
-    print(f"使用憑證檔案：{credentials_path}")
-    print(f"使用試算表 ID：{sheet_id}")
+    print(f"Using credentials file: {credentials_path}")
+    print(f"Using spreadsheet ID: {sheet_id}")
     
-    # 初始化客戶端
+    # Initialize the client
     client = GoogleSheetsClient(credentials_path, sheet_id)
     
     try:
-        # 1. 設定驗證
+        # 1. Setup validation
         demo_validation(client)
         
-        # 如果基本設定有問題，不繼續執行
+        # Don't continue if the basic setup has problems
         validation_result = client.validate_setup()
         if validation_result['overall_status'] == 'failed':
-            print("\n❌ 設定驗證失敗，請先解決上述問題後再執行範例")
+            print("\n❌ Setup validation failed; fix the issues above before running the example")
             return
         
-        # 2. 連接測試
+        # 2. Connection test
         demo_connection_test(client)
         
-        # 3. 確保試算表有正確的標題
-        print_section("初始化試算表")
+        # 3. Make sure the spreadsheet has the correct headers
+        print_section("Initialize spreadsheet")
         if client.create_sheet_if_not_exists():
-            print("✅ 試算表標題行初始化成功")
+            print("✅ Spreadsheet header row initialized")
         else:
-            print("⚠️  試算表標題行初始化可能有問題")
+            print("⚠️  Spreadsheet header row initialization may have failed")
         
-        # 4. 示範各種功能
+        # 4. Demonstrate the features
         demo_single_order(client)
         demo_batch_orders(client)
         demo_get_recent_orders(client)
         
-        print_section("範例程式執行完成")
-        print("🎉 所有功能示範完成！")
-        print("您可以查看 Google Sheets 確認資料是否正確新增")
+        print_section("Example finished")
+        print("🎉 All feature demos completed!")
+        print("Check Google Sheets to confirm the data was added correctly")
         
     except Exception as e:
-        print(f"\n❌ 執行過程中發生錯誤：{e}")
-        print("請檢查設定並重新執行")
+        print(f"\n❌ An error occurred during execution: {e}")
+        print("Check the setup and run again")
 
 if __name__ == "__main__":
     main()

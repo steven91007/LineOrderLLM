@@ -1,6 +1,9 @@
 """
-LIFF (LINE Front-end Framework) 處理器
-用於處理 LIFF 應用程式的訂單編輯功能
+LIFF (LINE Front-end Framework) handler
+Handles order editing for the LIFF app.
+
+Error strings returned in API responses below are shown to staff in the LIFF UI,
+so they stay in Chinese.
 """
 from flask import Flask, request, jsonify, render_template, session
 import json
@@ -12,31 +15,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 class LIFFHandler:
-    """LIFF 應用程式處理器"""
+    """Handler for the LIFF app."""
     
     def __init__(self, order_handler=None, google_sheets_client=None):
         """
-        初始化 LIFF 處理器
+        Initialize the LIFF handler.
         
         Args:
-            order_handler: 訂單處理器實例
-            google_sheets_client: Google Sheets 客戶端
+            order_handler: order handler instance
+            google_sheets_client: Google Sheets client
         """
         self.order_handler = order_handler
         self.google_sheets_client = google_sheets_client
-        # 暫存 LIFF 編輯會話（生產環境建議使用 Redis）
+        # In-memory store for LIFF edit sessions (Redis is recommended in production)
         self.liff_sessions = {}
         
     def create_liff_session(self, user_id: str, orders_data: Dict[str, Any]) -> str:
         """
-        建立 LIFF 編輯會話
+        Create a LIFF edit session.
         
         Args:
-            user_id: LINE 用戶 ID
-            orders_data: 訂單資料
+            user_id: LINE user ID
+            orders_data: order data
             
         Returns:
-            str: 會話 ID
+            str: session ID
         """
         session_id = str(uuid.uuid4())
         
@@ -45,7 +48,7 @@ class LIFFHandler:
             'orders': orders_data.get('orders', []),
             'total_orders': orders_data.get('total_orders', 0),
             'created_at': datetime.now(),
-            'expires_at': datetime.now() + timedelta(hours=2)  # 2小時過期
+            'expires_at': datetime.now() + timedelta(hours=2)  # Expires after 2 hours
         }
         
         logger.info(f"Created LIFF session {session_id} for user {user_id}")
@@ -53,20 +56,20 @@ class LIFFHandler:
     
     def get_liff_session(self, session_id: str) -> Dict[str, Any]:
         """
-        獲取 LIFF 編輯會話
+        Get a LIFF edit session.
         
         Args:
-            session_id: 會話 ID
+            session_id: session ID
             
         Returns:
-            Dict: 會話資料
+            Dict: session data
         """
         session_data = self.liff_sessions.get(session_id)
         
         if not session_data:
             return {'success': False, 'error': '會話不存在或已過期'}
         
-        # 檢查是否過期
+        # Check whether it has expired
         if datetime.now() > session_data['expires_at']:
             del self.liff_sessions[session_id]
             return {'success': False, 'error': '會話已過期'}
@@ -80,52 +83,52 @@ class LIFFHandler:
     
     def update_liff_session(self, session_id: str, updated_orders: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
         """
-        更新 LIFF 編輯會話中的訂單
+        Update the orders in a LIFF edit session.
         
         Args:
-            session_id: 會話 ID
-            updated_orders: 更新後的訂單列表
-            user_id: 用戶 ID (驗證用)
+            session_id: session ID
+            updated_orders: list of updated orders
+            user_id: user ID (for verification)
             
         Returns:
-            Dict: 更新結果
+            Dict: update result
         """
         session_data = self.liff_sessions.get(session_id)
         
         if not session_data:
             return {'success': False, 'error': '會話不存在或已過期'}
         
-        # 驗證用戶
+        # Verify the user
         if session_data['user_id'] != user_id:
             return {'success': False, 'error': '無權限修改此會話'}
         
-        # 檢查是否過期
+        # Check whether it has expired
         if datetime.now() > session_data['expires_at']:
             del self.liff_sessions[session_id]
             return {'success': False, 'error': '會話已過期'}
         
         try:
-            # 驗證訂單資料
+            # Validate the order data
             validated_orders = self._validate_orders(updated_orders)
             
             if not validated_orders['is_valid']:
                 return {'success': False, 'error': validated_orders['error']}
             
-            # 更新會話資料
+            # Update the session data
             session_data['orders'] = validated_orders['orders']
             session_data['total_orders'] = len(validated_orders['orders'])
             session_data['updated_at'] = datetime.now()
             
-            # 如果有 Google Sheets 客戶端，寫入試算表
+            # If a Google Sheets client is available, write to the spreadsheet
             if self.google_sheets_client:
                 try:
                     result = self.google_sheets_client.write_orders_batch(validated_orders['orders'])
                     logger.info(f"Orders written to Google Sheets: {result}")
                 except Exception as e:
                     logger.error(f"Failed to write to Google Sheets: {e}")
-                    # 不影響主要流程，僅記錄錯誤
+                    # Does not affect the main flow; just log the error
             
-            # 清除會話（編輯完成）
+            # Clear the session (editing is done)
             del self.liff_sessions[session_id]
             
             return {
@@ -140,13 +143,13 @@ class LIFFHandler:
     
     def _validate_orders(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        驗證訂單列表
+        Validate a list of orders.
         
         Args:
-            orders: 訂單列表
+            orders: list of orders
             
         Returns:
-            Dict: 驗證結果
+            Dict: validation result
         """
         if not isinstance(orders, list):
             return {'is_valid': False, 'error': '訂單資料格式錯誤'}
@@ -160,7 +163,7 @@ class LIFFHandler:
         validated_orders = []
         
         for i, order in enumerate(orders):
-            # 驗證必填欄位
+            # Validate required fields
             if not order.get('receiver_name'):
                 return {'is_valid': False, 'error': f'訂單 {i+1} 缺少收件人姓名'}
             
@@ -170,16 +173,16 @@ class LIFFHandler:
             if not order.get('shipping_address'):
                 return {'is_valid': False, 'error': f'訂單 {i+1} 缺少收件地址'}
             
-            # 驗證商品項目
+            # Validate the items
             items = order.get('items', [])
             if not items or len(items) == 0:
                 return {'is_valid': False, 'error': f'訂單 {i+1} 至少需要一個商品項目'}
             
-            # 清理和驗證商品項目
+            # Clean up and validate the items
             validated_items = []
             for item in items:
                 if not item.get('name') or not item.get('name').strip():
-                    continue  # 跳過空白商品
+                    continue  # Skip blank items
                 
                 validated_item = {
                     'name': item['name'].strip(),
@@ -190,10 +193,10 @@ class LIFFHandler:
             if not validated_items:
                 return {'is_valid': False, 'error': f'訂單 {i+1} 沒有有效的商品項目'}
             
-            # 驗證和標準化日期
+            # Validate and normalize the date
             shipping_date = order.get('shipping_date', '').strip()
             if shipping_date:
-                # 驗證 MM-DD 格式
+                # Validate MM-DD format
                 try:
                     parts = shipping_date.split('-')
                     if len(parts) != 2:
@@ -203,12 +206,12 @@ class LIFFHandler:
                     if month < 1 or month > 12 or day < 1 or day > 31:
                         return {'is_valid': False, 'error': f'訂單 {i+1} 日期數值無效'}
                     
-                    # 標準化格式
+                    # Normalize the format
                     shipping_date = f"{month:02d}-{day:02d}"
                 except:
                     return {'is_valid': False, 'error': f'訂單 {i+1} 日期格式錯誤'}
             
-            # 建立驗證後的訂單
+            # Build the validated order
             sender_name = order.get('sender_name') or ''
             sender_phone = order.get('sender_phone') or ''
             
@@ -227,7 +230,7 @@ class LIFFHandler:
         return {'is_valid': True, 'orders': validated_orders}
     
     def cleanup_expired_sessions(self):
-        """清理過期的會話"""
+        """Remove expired sessions."""
         expired_sessions = []
         current_time = datetime.now()
         
@@ -241,50 +244,50 @@ class LIFFHandler:
     
     def get_liff_url(self, session_id: str, liff_id: str = None, base_url: str = None) -> str:
         """
-        獲取 LIFF 應用程式 URL
-        使用 OAuth2 state 參數攜帶 session ID，保持 redirectUri 乾淨
+        Get the LIFF app URL.
+        The session ID is carried in the OAuth2 state parameter so redirectUri stays clean.
         
         Args:
-            session_id: 會話 ID（將放入 state 參數）
-            liff_id: LIFF 應用程式 ID
-            base_url: 基礎 URL（從 request 或環境變數取得）
+            session_id: session ID (goes into the state parameter)
+            liff_id: LIFF app ID
+            base_url: base URL (from the request or an environment variable)
             
         Returns:
             str: LIFF URL
         """
         if liff_id:
-            # 使用乾淨的 redirectUri（不包含 session 參數）
+            # Use a clean redirectUri (no session parameter)
             if base_url:
                 redirect_uri = f"{base_url}/liff/edit"
             else:
-                # 降級方案：使用相對路徑
+                # Fallback: use a relative path
                 redirect_uri = "/liff/edit"
             
-            # session ID 會在前端透過 state 參數攜帶，這裡只提供基礎 URL
+            # The frontend carries the session ID via the state parameter; only the base URL is provided here
             return f"https://liff.line.me/{liff_id}?liffRedirectUri={redirect_uri}&sessionId={session_id}"
         else:
-            # 如果沒有 LIFF ID，返回 Web 版本 URL（保持原有功能）
+            # Without a LIFF ID, return the web version URL (keeps the original behavior)
             return f"/liff/edit?session={session_id}"
 
-# Flask 路由設定
+# Flask route setup
 def setup_liff_routes(app: Flask, liff_handler: LIFFHandler):
-    """設定 LIFF 相關路由"""
+    """Register the LIFF-related routes."""
     
     @app.route('/liff/edit')
     def liff_edit_page():
-        """LIFF 編輯頁面"""
+        """LIFF edit page."""
         session_id = request.args.get('session')
         if not session_id:
             return "缺少會話 ID", 400
         
-        # 從環境變數或參數取得 LIFF ID
+        # Get the LIFF ID from the environment or parameters
         import os
         liff_id = os.getenv('LIFF_ID', '')
         return render_template('liff_order_edit.html', session_id=session_id, LIFF_ID=liff_id)
     
     @app.route('/liff/simple')
     def liff_simple_page():
-        """簡化版編輯頁面 - 無需 LIFF 登入"""
+        """Simplified edit page - no LIFF login required."""
         session_id = request.args.get('session')
         if not session_id:
             return "缺少會話 ID", 400
@@ -293,13 +296,13 @@ def setup_liff_routes(app: Flask, liff_handler: LIFFHandler):
     
     @app.route('/api/liff/orders/<session_id>', methods=['GET'])
     def get_liff_orders(session_id):
-        """獲取 LIFF 會話中的訂單"""
+        """Get the orders in a LIFF session."""
         result = liff_handler.get_liff_session(session_id)
         return jsonify(result)
     
     @app.route('/api/liff/orders/<session_id>', methods=['PUT'])
     def update_liff_orders(session_id):
-        """更新 LIFF 會話中的訂單"""
+        """Update the orders in a LIFF session."""
         data = request.get_json()
         
         if not data:
@@ -317,6 +320,6 @@ def setup_liff_routes(app: Flask, liff_handler: LIFFHandler):
     
     @app.route('/api/liff/cleanup', methods=['POST'])
     def cleanup_liff_sessions():
-        """清理過期會話（可定期呼叫）"""
+        """Remove expired sessions (can be called periodically)."""
         liff_handler.cleanup_expired_sessions()
         return jsonify({'success': True, 'message': '清理完成'})

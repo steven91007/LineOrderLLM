@@ -1,8 +1,9 @@
 """
-Google 表單回覆試算表的寫入客戶端
+Write client for the Google Form responses spreadsheet.
 
-GoogleSheetsClient 寫的是舊的 10 欄自訂格式，而且會依出貨日自動開新分頁；
-表單回覆試算表是固定的 12 欄單一分頁，兩者不相容，所以獨立成這個類別。
+GoogleSheetsClient writes the old custom 10-column format and automatically
+opens a new tab per shipping date; the form responses spreadsheet is a single
+fixed 12-column tab. The two are incompatible, hence this separate class.
 """
 
 import logging
@@ -22,7 +23,7 @@ DEFAULT_SHEET_NAME = '表單回覆 1'
 
 
 class FormSheetClient:
-    """讀寫『表單回覆 1』分頁"""
+    """Read and write the 『表單回覆 1』 (form responses 1) tab."""
 
     def __init__(self, credentials_path: str, sheet_id: str,
                  sheet_name: str = DEFAULT_SHEET_NAME):
@@ -38,13 +39,14 @@ class FormSheetClient:
         return build('sheets', 'v4', credentials=credentials)
 
     def _range(self, cells: str) -> str:
-        # 分頁名稱含空白，一定要加單引號
+        # The tab name contains a space, so it must be single-quoted
         return f"'{self.sheet_name}'!{cells}"
 
     def verify_columns(self) -> Dict[str, Any]:
-        """確認試算表的欄位順序和程式預期的一致
+        """Confirm the spreadsheet's column order matches what the code expects.
 
-        表單改題目會讓欄位位移，寫入就會錯位，所以每次寫入前都先驗一次。
+        Editing the form's questions shifts the columns and would misalign
+        writes, so this is checked before every write.
         """
         try:
             result = self.service.spreadsheets().values().get(
@@ -52,7 +54,7 @@ class FormSheetClient:
                 range=self._range('A1:L1'),
             ).execute()
         except HttpError as error:
-            return {'ok': False, 'error': f'讀取標題列失敗：{error}'}
+            return {'ok': False, 'error': f'讀取標題列失敗：{error}'}  # shown in Discord/GUI ("failed to read header row")
 
         actual = result.get('values', [[]])
         actual = actual[0] if actual else []
@@ -65,19 +67,21 @@ class FormSheetClient:
             found = actual[index] if index < len(actual) else '<缺少>'
             if found != expected:
                 column_letter = chr(ord('A') + index)
+                # Shown in Discord/GUI: "column X: expected ..., actual ..."
                 mismatches.append(f'{column_letter} 欄：預期「{expected}」，實際「{found}」')
 
         return {
             'ok': False,
-            'error': '試算表欄位與程式預期不符，表單題目可能被改過',
+            'error': '試算表欄位與程式預期不符，表單題目可能被改過',  # shown in Discord/GUI
             'mismatches': mismatches,
             'columns': actual,
         }
 
     def existing_keys(self) -> set:
-        """回傳已存在訂單的識別鍵，用來避免重複寫入
+        """Return the identity keys of existing orders, used to avoid duplicate writes.
 
-        識別鍵取「收件人 + 收件人電話 + 配送日期」，這三者相同幾乎可以確定是同一筆。
+        The key is receiver + receiver phone + delivery date; when all three
+        match it is almost certainly the same order.
         """
         try:
             result = self.service.spreadsheets().values().get(
@@ -86,10 +90,10 @@ class FormSheetClient:
                 valueRenderOption='FORMATTED_VALUE',
             ).execute()
         except HttpError as error:
-            logger.warning(f'讀取既有訂單失敗，略過重複檢查：{error}')
+            logger.warning(f'Failed to read existing orders, skipping duplicate check: {error}')
             return set()
 
-        rows = result.get('values', [])[1:]  # 跳過標題列
+        rows = result.get('values', [])[1:]  # Skip the header row
         keys = set()
         for row in rows:
             padded = row + [''] * (12 - len(row))
@@ -97,7 +101,7 @@ class FormSheetClient:
         return keys
 
     def read_all_rows(self) -> List[List[Any]]:
-        """讀出整個分頁（含標題列），每列補齊成 12 欄"""
+        """Read the whole tab (including the header row), padding each row to 12 columns."""
         result = self.service.spreadsheets().values().get(
             spreadsheetId=self.sheet_id,
             range=self._range(FORM_RANGE),
@@ -108,7 +112,7 @@ class FormSheetClient:
         return [row + [''] * (len(FORM_COLUMNS) - len(row)) for row in rows]
 
     def append_rows(self, rows: List[List[Any]]) -> Dict[str, Any]:
-        """把資料列附加到分頁最後"""
+        """Append data rows to the end of the tab."""
         if not rows:
             return {'success': True, 'appended_rows': 0}
 
@@ -121,7 +125,7 @@ class FormSheetClient:
                 body={'values': rows, 'majorDimension': 'ROWS'},
             ).execute()
         except HttpError as error:
-            return {'success': False, 'error': f'Google Sheets API 錯誤：{error}'}
+            return {'success': False, 'error': f'Google Sheets API 錯誤：{error}'}  # shown in Discord/GUI
 
         updates = result.get('updates', {})
         return {
@@ -132,14 +136,14 @@ class FormSheetClient:
 
 
 def dedup_key(receiver_name: str, receiver_phone: str, shipping_date: str) -> str:
-    """產生訂單識別鍵，電話去掉分隔符號、日期正規化，避免格式差異造成漏判"""
+    """Build the order identity key; strip separators from the phone and normalize the date so formatting differences don't cause missed matches."""
     phone = ''.join(ch for ch in (receiver_phone or '') if ch.isdigit())
     date = _normalize_date(shipping_date)
     return f'{(receiver_name or "").strip()}|{phone}|{date}'
 
 
 def _normalize_date(value: str) -> str:
-    """把 2026/8/16、2026-08-16 等寫法統一成 2026-08-16"""
+    """Normalize forms like 2026/8/16 and 2026-08-16 to 2026-08-16."""
     text = (value or '').strip()
     if not text:
         return ''
@@ -152,12 +156,12 @@ def _normalize_date(value: str) -> str:
 
 
 def format_timestamp(moment: datetime) -> str:
-    """輸出成表單時間戳記的樣子（USER_ENTERED 會轉成真正的日期時間值）"""
+    """Format like a form timestamp (USER_ENTERED converts it to a real datetime value)."""
     return moment.strftime('%Y/%m/%d %H:%M:%S')
 
 
 def format_shipping_date(value: Optional[str]) -> str:
-    """配送日期欄存的是真正的日期值，寫入 YYYY/M/D 讓 Sheets 自動轉型"""
+    """The delivery date column holds real date values; write YYYY/M/D so Sheets converts it automatically."""
     normalized = _normalize_date(value or '')
     if not normalized:
         return ''

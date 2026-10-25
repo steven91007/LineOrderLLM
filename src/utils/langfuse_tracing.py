@@ -1,12 +1,15 @@
-"""Langfuse 追蹤設定
+"""Langfuse tracing setup.
 
-用 OpenInference 的 DSPy instrumentor 自動捕捉每一次 LLM 呼叫
-（prompt、completion、token 數、延遲、模型參數），再由本模組補上
-DSPy 看不到的那一半：品項對照、地址標準化、日期驗證、重複檢查、寫入試算表。
+OpenInference's DSPy instrumentor automatically captures every LLM call
+(prompt, completion, token counts, latency, model parameters); this module adds
+the half DSPy can't see: item mapping, address normalization, date validation,
+duplicate checks, and writing to the spreadsheet.
 
-Session 的切法：**一筆訂單一個 session**。session_id 取「收件人｜電話｜配送日」，
-這樣同一筆訂單從解析、複查到寫入試算表的所有 trace 會被串在一起，
-之後客人改單再跑一次也會落進同一個 session，可以完整回放這筆訂單的來龍去脈。
+How sessions are split: **one session per order**. The session_id is
+"receiver | phone | delivery date", so every trace for the same order, from
+parsing and the re-check through to writing the sheet, is tied together. If the
+customer later amends the order and it is run again, it lands in the same
+session, so the order's full history can be replayed.
 """
 
 import logging
@@ -21,14 +24,15 @@ _enabled = False
 
 
 def is_enabled() -> bool:
-    """Langfuse 是否可用。沒設金鑰時整套追蹤靜默停用，不影響主流程。"""
+    """Whether Langfuse is available. Without keys, tracing is silently disabled and the main flow is unaffected."""
     return _enabled
 
 
 def setup() -> bool:
-    """初始化 Langfuse 與 DSPy instrumentor，回傳是否啟用成功
+    """Initialize Langfuse and the DSPy instrumentor; return whether it was enabled.
 
-    重複呼叫是安全的（Flask 每個請求都會建新的 importer，但只會初始化一次）。
+    Safe to call repeatedly (Flask builds a new importer per request, but this
+    only initializes once).
     """
     global _initialized, _enabled
     if _initialized:
@@ -37,7 +41,7 @@ def setup() -> bool:
     _initialized = True
 
     if not (os.getenv('LANGFUSE_PUBLIC_KEY') and os.getenv('LANGFUSE_SECRET_KEY')):
-        logger.info('未設定 LANGFUSE_PUBLIC_KEY／LANGFUSE_SECRET_KEY，停用 Langfuse 追蹤')
+        logger.info('LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY not set; Langfuse tracing disabled')
         return False
 
     try:
@@ -46,15 +50,15 @@ def setup() -> bool:
 
         client = get_client()
         if not client.auth_check():
-            logger.warning('Langfuse 認證失敗，停用追蹤（請檢查金鑰與 LANGFUSE_BASE_URL）')
+            logger.warning('Langfuse auth failed; tracing disabled (check the keys and LANGFUSE_BASE_URL)')
             return False
 
         DSPyInstrumentor().instrument()
         _enabled = True
-        logger.info(f'Langfuse 追蹤已啟用：{os.getenv("LANGFUSE_BASE_URL")}')
+        logger.info(f'Langfuse tracing enabled: {os.getenv("LANGFUSE_BASE_URL")}')
     except Exception as error:
-        # 追蹤壞掉絕對不能讓訂單處理跟著壞掉
-        logger.warning(f'Langfuse 初始化失敗，停用追蹤：{error}')
+        # Broken tracing must never break order processing
+        logger.warning(f'Langfuse initialization failed; tracing disabled: {error}')
         return False
 
     return _enabled
@@ -63,11 +67,12 @@ def setup() -> bool:
 @contextmanager
 def trace(name: str, session_id: Optional[str] = None,
           input_data: Any = None, metadata: Optional[Dict[str, Any]] = None):
-    """建立一個 span，可選擇性掛上 session
+    """Create a span, optionally attached to a session.
 
-    未啟用時是無操作的 context manager，呼叫端不需要做任何判斷。
-    yield 出來的物件有 .update(output=..., metadata=...) 可以補寫結果；
-    停用時 yield 的是 _NullSpan，同樣有 .update()，所以呼叫端寫法一致。
+    When disabled it is a no-op context manager, so callers need no checks.
+    The yielded object has .update(output=..., metadata=...) for adding results;
+    when disabled it yields a _NullSpan, which also has .update(), so caller
+    code is the same either way.
     """
     if not _enabled:
         yield _NullSpan()
@@ -79,13 +84,14 @@ def trace(name: str, session_id: Optional[str] = None,
         yield _NullSpan()
         return
 
-    # 只有「建立 span」這段可以失敗就算了；yield 之後的錯誤是呼叫端的業務錯誤，
-    # 必須原樣往外拋。
+    # Only the "create the span" part may fail silently; errors after the yield
+    # are the caller's business errors and must propagate unchanged.
     #
-    # 之前這裡是把整個 with（含 yield）包在 try/except 裡，呼叫端 body 一拋例外，
-    # 就會被這裡接住然後再 yield 一次 —— contextmanager 不允許 throw 之後再 yield，
-    # Python 會轉成 RuntimeError: generator didn't stop after throw()，
-    # 真正的錯誤與 traceback 全部消失，非常難查。
+    # This used to wrap the whole with-block (including the yield) in try/except:
+    # as soon as the caller's body raised, it was caught here and yielded again.
+    # contextmanager does not allow yielding after a throw, so Python turned it
+    # into RuntimeError: generator didn't stop after throw(), and the real error
+    # and traceback vanished, which made it very hard to debug.
     from contextlib import ExitStack
 
     stack = ExitStack()
@@ -101,12 +107,12 @@ def trace(name: str, session_id: Optional[str] = None,
         if session_id:
             stack.enter_context(propagate_attributes(session_id=session_id[:200]))
     except Exception as error:
-        logger.warning(f'Langfuse span「{name}」建立失敗，略過追蹤：{error}')
+        logger.warning(f'Failed to create Langfuse span "{name}"; skipping tracing: {error}')
         stack.close()
         yield _NullSpan()
         return
 
-    # ExitStack 會把 body 的例外正確傳給 span 收尾，同時讓例外繼續往外拋
+    # ExitStack passes the body's exception to the span's cleanup correctly and keeps it propagating
     with stack:
         yield span
 
@@ -149,20 +155,21 @@ def generation(name: str, *, model: Optional[str] = None, input_data: Any = None
 
 
 def score(name: str, value: float, comment: Optional[str] = None):
-    """對目前的 trace 打分數，用來累積解析品質的長期統計"""
+    """Score the current trace, to build up long-term parsing-quality statistics"""
     if not _enabled:
         return
     try:
         from langfuse import get_client
         get_client().score_current_trace(name=name, value=value, comment=comment)
     except Exception as error:
-        logger.debug(f'Langfuse 評分失敗：{error}')
+        logger.debug(f'Langfuse scoring failed: {error}')
 
 
 def flush():
-    """把緩衝中的追蹤資料送出
+    """Send buffered tracing data.
 
-    CLI 這種跑完就結束的程式一定要呼叫，否則行程結束時資料還沒送出去。
+    Programs that exit when done, like the CLI, must call this, otherwise the
+    data is not sent before the process exits.
     """
     if not _enabled:
         return
@@ -170,11 +177,11 @@ def flush():
         from langfuse import get_client
         get_client().flush()
     except Exception as error:
-        logger.debug(f'Langfuse flush 失敗：{error}')
+        logger.debug(f'Langfuse flush failed: {error}')
 
 
 class _NullSpan:
-    """停用追蹤時的替身，讓呼叫端不必到處寫 if"""
+    """Stand-in used when tracing is disabled, so callers don't need ifs everywhere"""
 
     def update(self, **kwargs):
         pass
@@ -183,10 +190,10 @@ class _NullSpan:
         pass
 
 
-# --- 相容別名 ---
-# dspy_client.py 與 openai_client.py 用的是 init_tracing／observation／
-# update_observation 這組命名，與本模組的 setup／trace 是同一件事。
-# 保留兩套名稱，避免去改動那兩個檔案既有的呼叫方式。
+# --- Compatibility aliases ---
+# dspy_client.py and openai_client.py use the init_tracing / observation /
+# update_observation names, which are the same thing as this module's setup / trace.
+# Both sets of names are kept so those two files' existing calls don't need changing.
 
 init_tracing = setup
 
@@ -194,19 +201,19 @@ init_tracing = setup
 @contextmanager
 def observation(name: str, input: Any = None, metadata: Optional[Dict[str, Any]] = None,
                 session_id: Optional[str] = None):
-    """trace() 的別名，參數名用 input（而非 input_data）"""
+    """Alias of trace(), with the parameter named input (instead of input_data)"""
     with trace(name, session_id=session_id, input_data=input, metadata=metadata) as span:
         yield span
 
 
 def update_observation(span, **kwargs):
-    """對 observation() 產生的 span 補寫 input／output／metadata
+    """Add input/output/metadata to a span created by observation().
 
-    span 可能是 None 或 _NullSpan（追蹤停用時），一律安全略過。
+    span may be None or a _NullSpan (when tracing is disabled); both are safely skipped.
     """
     if span is None:
         return
     try:
         span.update(**kwargs)
     except Exception as error:
-        logger.debug(f'Langfuse observation 更新失敗：{error}')
+        logger.debug(f'Langfuse observation update failed: {error}')

@@ -1,18 +1,22 @@
 """
-把訂單總表（『表單回覆 1』）依「欲配送日期」拆成一天一個分頁
+Split the master order sheet (『表單回覆 1』) by "欲配送日期" (desired delivery
+date) into one tab per day.
 
-同一個試算表檔案裡，每個配送日期開一個以日期命名的分頁（例如 `2026-08-16`），
-內容是總表中該日期的所有訂單列，欄位順序與總表完全一致。
+Within the same spreadsheet file, each delivery date gets a tab named after the
+date (e.g. `2026-08-16`) holding all of the master sheet's order rows for that
+date, with exactly the same column order as the master sheet.
 
-每個日期分頁的訂單列下方，會再附上該日的出貨統計（備貨清單），
-形如 `20A 禮盒 1盒*2個地址`，統計邏輯見 shipping_summary.py。
+Below each date tab's order rows, that day's shipping statistics (packing list)
+are appended, e.g. `20A 禮盒 1盒*2個地址`; see shipping_summary.py for the logic.
 
-訂單列會套上隔行底色（偶數列淺橘），方便長輩橫著看不會串行。
+Order rows get alternating background colors (light orange on even rows) so
+elderly staff can read across a row without drifting onto the next one.
 
-設計上刻意做成「每次執行都重建日期分頁」：
-先清空該分頁再整批寫入，所以重複執行不會產生重複資料，
-總表改過之後再跑一次就會同步。也因此**不要手動編輯日期分頁**，
-要改請改總表，日期分頁純粹是總表的投影。
+By design, date tabs are rebuilt on every run: the tab is cleared and then
+written in one batch, so repeated runs never create duplicate data, and
+re-running after the master sheet changes brings them back in sync. For the
+same reason, **do not edit date tabs by hand** -- make changes in the master
+sheet; date tabs are purely a projection of it.
 """
 
 import logging
@@ -29,27 +33,27 @@ from .shipping_summary import summarize, summary_rows
 
 logger = logging.getLogger(__name__)
 
-# 配送日期在 L 欄
+# The delivery date is in column L
 SHIPPING_DATE_INDEX = 11
 
-# 沒填配送日期、或日期格式看不懂的訂單放這裡，避免資料在拆分時消失
+# Orders with no delivery date, or an unreadable one, go here so no data is lost during the split
 UNDATED_SHEET_NAME = '未指定日期'
 
-# 分頁名稱樣式：YYYY-MM-DD，用來判斷哪些分頁是本工具產生的
+# Tab name pattern YYYY-MM-DD, used to tell which tabs this tool generated
 DATE_SHEET_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
-# 表單日期欄可能出現的寫法
+# Formats that may appear in the form date column
 _DATE_FORMATS = ('%Y/%m/%d', '%Y-%m-%d', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M:%S')
 
-# 訂單列的隔行底色：偶數列（第 2、4、6… 列）淺橘、奇數列白底。
-# 長輩看整排文字容易跳行，隔行上色是為了讓一列資料橫著看不會串行，
-# 顏色刻意選飽和度低的淺橘（#FFE0B2），列印或投影都還看得出黑字。
+# Alternating row colors for order rows: even rows (2, 4, 6, ...) light orange, odd rows white.
+# Elderly staff easily skip lines when reading long rows of text; banding keeps the eye on one row.
+# The low-saturation light orange (#FFE0B2) is deliberate so black text stays legible when printed or projected.
 BAND_COLOR = {'red': 1.0, 'green': 0.878, 'blue': 0.698}
 BAND_ALT_COLOR = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
 
 
 class SheetDateOrganizer:
-    """依配送日期把總表分頁化"""
+    """Split the master sheet into tabs by delivery date."""
 
     def __init__(self, credentials_path: str, sheet_id: str,
                  source_sheet: str = None):
@@ -63,18 +67,18 @@ class SheetDateOrganizer:
 
     def organize(self, dry_run: bool = True,
                  today: Optional[date] = None) -> Dict[str, Any]:
-        """讀總表、依日期分組，並（在 dry_run=False 時）寫回各日期分頁
+        """Read the master sheet, group by date, and (when dry_run=False) write back each date tab.
 
         Args:
-            dry_run: True 只回報將會怎麼分，不動試算表
+            dry_run: If True, only report how rows would be split without touching the spreadsheet
 
         Returns:
-            分組結果與寫入狀況
+            The grouping result and write status
         """
         try:
             rows = self.client.read_all_rows()
         except HttpError as error:
-            return {'success': False, 'error': f'讀取總表失敗：{error}'}
+            return {'success': False, 'error': f'讀取總表失敗：{error}'}  # shown in Discord
 
         if len(rows) <= 1:
             return {
@@ -82,7 +86,7 @@ class SheetDateOrganizer:
                 'groups': OrderedDict(),
                 'total_rows': 0,
                 'written_sheets': [],
-                'message': '總表沒有訂單資料',
+                'message': '總表沒有訂單資料',  # shown in Discord ("master sheet has no orders")
             }
 
         header = rows[0]
@@ -95,16 +99,17 @@ class SheetDateOrganizer:
         try:
             existing = self._existing_sheets()
         except HttpError as error:
-            return {'success': False, 'error': f'讀取分頁清單失敗：{error}'}
+            return {'success': False, 'error': f'讀取分頁清單失敗：{error}'}  # shown in Discord
 
-        # 出貨日已經過去的分頁鎖定不動：貨已經出了，那份清單就是歷史紀錄，
-        # 不該再跟著總表變動。之後就算有人改了總表的舊訂單，也不會蓋掉出貨當下的樣子。
+        # Tabs whose shipping date has passed are locked: the goods have shipped, so that list is a
+        # historical record and should no longer follow the master sheet. Even if someone later edits
+        # an old order in the master sheet, it won't overwrite what the list looked like at shipping time.
         today = today or date.today()
         locked = [name for name in groups if is_past_sheet(name, today)]
 
-        # 訂單改了配送日期之後，原本那天的分頁會變成沒有來源的殘留資料。
-        # 日期分頁是總表的投影，留著就是錯的，所以要一併清空。
-        # 但已出貨的分頁不算殘留——它本來就不該再有對應的訂單。
+        # When an order's delivery date changes, the original day's tab is left with orphaned data.
+        # Date tabs are a projection of the master sheet, so keeping it would be wrong; clear it too.
+        # Already-shipped tabs don't count as stale -- they aren't supposed to have matching orders anymore.
         stale = [name for name in existing
                  if is_date_sheet(name) and name not in groups
                  and not is_past_sheet(name, today)]
@@ -128,13 +133,13 @@ class SheetDateOrganizer:
             for sheet_name in stale:
                 self._clear_sheet(sheet_name)
                 self._apply_banding(existing[sheet_name], 0)
-                logger.info(f'清空已無訂單的日期分頁：{sheet_name}')
+                logger.info(f'Cleared date tab with no remaining orders: {sheet_name}')
 
             for sheet_name, data_rows in groups.items():
                 meta = existing.get(sheet_name) or self._create_sheet(sheet_name)
 
                 if sheet_name in locked:
-                    # 已出貨：內容維持原樣，只確保保護還在
+                    # Already shipped: leave the content as-is, just make sure the protection is still there
                     self._protect_sheet(sheet_name, meta)
                     continue
 
@@ -146,23 +151,23 @@ class SheetDateOrganizer:
                 result['written_sheets'].append(sheet_name)
         except HttpError as error:
             result['success'] = False
-            result['error'] = f'寫入日期分頁失敗：{error}'
+            result['error'] = f'寫入日期分頁失敗：{error}'  # shown in Discord
 
         return result
 
     def _group_by_date(self, data_rows: List[List[Any]]) -> "OrderedDict[str, List[List[Any]]]":
-        """依配送日期分組，日期由早到晚，未指定日期排最後"""
+        """Group by delivery date, earliest first, with the unspecified-date group last."""
         groups: Dict[str, List[List[Any]]] = {}
 
         for row in data_rows:
             if not any(str(cell).strip() for cell in row):
-                continue  # 略過空白列
+                continue  # Skip blank rows
 
             raw_date = row[SHIPPING_DATE_INDEX] if len(row) > SHIPPING_DATE_INDEX else ''
             sheet_name = normalize_sheet_date(raw_date) or UNDATED_SHEET_NAME
             groups.setdefault(sheet_name, []).append(row)
 
-        # 未指定日期固定排在最後
+        # The unspecified-date group always goes last
         ordered = OrderedDict()
         for name in sorted(k for k in groups if k != UNDATED_SHEET_NAME):
             ordered[name] = groups[name]
@@ -171,10 +176,10 @@ class SheetDateOrganizer:
         return ordered
 
     def _existing_sheets(self) -> "OrderedDict[str, Dict[str, Any]]":
-        """分頁名稱 → {'id': 分頁 gid, 'bandings': 既有隔行底色的 id 清單}
+        """Tab name -> {'id': tab gid, 'bandings': ids of existing row bandings}
 
-        隔行底色（banding）要能重新套用，就得知道舊的 banding id 才能先刪掉，
-        所以這裡順手把 bandedRanges 一起讀回來，避免之後再多打一次 API。
+        To re-apply banding we need the old banding ids so they can be deleted
+        first, so bandedRanges is read back here as well to save an extra API call.
         """
         spreadsheet = self.service.spreadsheets().get(
             spreadsheetId=self.sheet_id,
@@ -193,7 +198,7 @@ class SheetDateOrganizer:
         return sheets
 
     def _create_sheet(self, sheet_name: str) -> Dict[str, Any]:
-        """新增分頁並凍結標題列，回傳 {'id', 'bandings'}"""
+        """Add a tab and freeze the header row; returns {'id', 'bandings'}."""
         response = self.service.spreadsheets().batchUpdate(
             spreadsheetId=self.sheet_id,
             body={'requests': [{
@@ -207,7 +212,7 @@ class SheetDateOrganizer:
         ).execute()
 
         new_sheet_id = (response['replies'][0]['addSheet']['properties']['sheetId'])
-        # 標題列加粗、灰底，和總表的視覺一致
+        # Bold header row with gray background, matching the master sheet
         self.service.spreadsheets().batchUpdate(
             spreadsheetId=self.sheet_id,
             body={'requests': [{
@@ -223,25 +228,27 @@ class SheetDateOrganizer:
                 }
             }]},
         ).execute()
-        logger.info(f'建立日期分頁：{sheet_name}')
+        logger.info(f'Created date tab: {sheet_name}')
         return {'id': new_sheet_id, 'bandings': []}
 
     def _apply_banding(self, meta: Dict[str, Any], data_row_count: int) -> None:
-        """重設訂單列的隔行底色（偶數列淺橘）
+        """Reset the alternating row colors of the order rows (light orange on even rows).
 
-        分頁每次都重建、列數會變，所以先刪掉舊的 banding 再依這次的列數重建，
-        免得舊範圍蓋到下方的備貨清單、或訂單變少後留下一段空的橘底。
+        Tabs are rebuilt every time and the row count changes, so the old banding
+        is deleted first and rebuilt for this run's row count; otherwise the old
+        range could cover the packing list below, or leave an empty orange strip
+        after the number of orders shrinks.
 
         Args:
-            meta: `_existing_sheets` / `_create_sheet` 給的 {'id', 'bandings'}
-            data_row_count: 訂單列數（不含標題列），0 表示只刪不加
+            meta: The {'id', 'bandings'} from `_existing_sheets` / `_create_sheet`
+            data_row_count: Number of order rows (excluding the header); 0 means delete only, add nothing
         """
         requests = [{'deleteBanding': {'bandedRangeId': banding_id}}
                     for banding_id in meta.get('bandings', [])]
 
         if data_row_count > 0:
-            # 範圍從第 2 列（標題列之後）開始，所以第一條色帶就落在試算表的第 2 列，
-            # 之後每隔一列一次 → 淺橘剛好都在偶數列。
+            # The range starts at row 2 (after the header), so the first band lands on sheet row 2
+            # and then every other row -> the light orange falls exactly on even rows.
             requests.append({'addBanding': {'bandedRange': {
                 'range': {
                     'sheetId': meta['id'],
@@ -264,21 +271,23 @@ class SheetDateOrganizer:
             body={'requests': requests},
         ).execute()
 
-        # 同一次執行若再次寫入同一分頁，要刪的是剛剛新增的這條
+        # If the same tab is written again in the same run, the one to delete is the banding just added
         meta['bandings'] = [
             reply['addBanding']['bandedRange']['bandedRangeId']
             for reply in response.get('replies', []) if 'addBanding' in reply
         ]
 
     def _protect_sheet(self, sheet_name: str, meta: Dict[str, Any]) -> None:
-        """替已出貨的日期分頁加上保護
+        """Add protection to an already-shipped date tab.
 
-        用 warningOnly：編輯時 Google 會跳「你正在編輯受保護的儲存格」確認框，
-        擋得住手滑，但不會把任何人（包含這支程式用的服務帳號）鎖在外面。
-        改成限制編輯者的話，服務帳號有可能反而失去寫入權限，之後要解鎖會很麻煩。
+        Uses warningOnly: when editing, Google shows a "you are editing a protected
+        cell" confirmation, which guards against slips without locking anyone out
+        (including the service account this program uses). Restricting editors
+        instead could cost the service account its write access, which would be
+        painful to undo later.
         """
         if meta.get('protections'):
-            return  # 已經保護過了，重複加會變成一堆重疊的保護範圍
+            return  # Already protected; adding again would pile up overlapping protected ranges
 
         try:
             self.service.spreadsheets().batchUpdate(
@@ -287,20 +296,20 @@ class SheetDateOrganizer:
                     'addProtectedRange': {
                         'protectedRange': {
                             'range': {'sheetId': meta['id']},
-                            'description': f'{sheet_name} 已出貨，內容鎖定',
+                            'description': f'{sheet_name} 已出貨，內容鎖定',  # shown in Sheets ("shipped, content locked")
                             'warningOnly': True,
                         }
                     }
                 }]},
             ).execute()
             meta.setdefault('protections', []).append(True)
-            logger.info(f'鎖定已出貨的日期分頁：{sheet_name}')
+            logger.info(f'Locked shipped date tab: {sheet_name}')
         except HttpError as error:
-            # 鎖不起來不該讓整批整理失敗，記錄下來就好
-            logger.warning(f'鎖定分頁 {sheet_name} 失敗：{error}')
+            # Failing to lock shouldn't fail the whole batch; just log it
+            logger.warning(f'Failed to lock tab {sheet_name}: {error}')
 
     def _clear_sheet(self, sheet_name: str) -> None:
-        """清空分頁內容（統計區塊只佔 A 欄，清除範圍仍用 A:L 蓋掉整片舊內容）"""
+        """Clear the tab content (the statistics block only uses column A, but A:L is cleared to wipe all old content)."""
         self.service.spreadsheets().values().clear(
             spreadsheetId=self.sheet_id,
             range=f"'{sheet_name}'!{FORM_RANGE}",
@@ -310,11 +319,11 @@ class SheetDateOrganizer:
     def _replace_sheet_content(self, sheet_name: str, header: List[Any],
                                data_rows: List[List[Any]],
                                extra_rows: List[List[Any]] = None) -> None:
-        """清空分頁後重新寫入標題列、訂單列，以及附在下方的統計區塊"""
+        """Clear the tab, then rewrite the header row, order rows, and the statistics block below them."""
         self._clear_sheet(sheet_name)
 
-        # 用 RAW 而不是 USER_ENTERED：總表讀出來的已經是顯示值，
-        # 交給 Sheets 重新解讀會把電話 0937... 當成數字吃掉開頭的 0。
+        # Use RAW rather than USER_ENTERED: values read from the master sheet are already display values,
+        # and letting Sheets re-interpret them would treat phone 0937... as a number and drop the leading 0.
         self.service.spreadsheets().values().update(
             spreadsheetId=self.sheet_id,
             range=f"'{sheet_name}'!A1",
@@ -325,14 +334,14 @@ class SheetDateOrganizer:
 
 
 def is_past_sheet(sheet_name: str, today: date) -> bool:
-    """分頁的日期是不是已經過去了（今天當天不算）"""
+    """Whether the tab's date has already passed (today does not count)."""
     if not DATE_SHEET_PATTERN.match(sheet_name):
-        return False  # 未指定日期之類的非日期分頁，永遠不鎖
+        return False  # Non-date tabs such as the unspecified-date tab are never locked
     return datetime.strptime(sheet_name, '%Y-%m-%d').date() < today
 
 
 def normalize_sheet_date(value: Any) -> Optional[str]:
-    """把配送日期欄的值轉成分頁名稱 `YYYY-MM-DD`，看不懂就回 None"""
+    """Convert a delivery date cell value into a tab name `YYYY-MM-DD`; return None if unreadable."""
     text = str(value or '').strip()
     if not text:
         return None
@@ -343,7 +352,7 @@ def normalize_sheet_date(value: Any) -> Optional[str]:
         except ValueError:
             continue
 
-    # 「2026/8/16(星期日)」這種帶註記的寫法，先把括號拿掉再試一次
+    # For annotated forms like 「2026/8/16(星期日)」, strip the parenthesized part and try again
     stripped = re.split(r'[（(]', text)[0].strip()
     if stripped and stripped != text:
         return normalize_sheet_date(stripped)
@@ -352,7 +361,7 @@ def normalize_sheet_date(value: Any) -> Optional[str]:
 
 
 def is_date_sheet(sheet_name: str) -> bool:
-    """判斷分頁是否為本工具產生的日期分頁"""
+    """Determine whether a tab is a date tab generated by this tool."""
     return bool(DATE_SHEET_PATTERN.match(sheet_name)) or sheet_name == UNDATED_SHEET_NAME
 
 

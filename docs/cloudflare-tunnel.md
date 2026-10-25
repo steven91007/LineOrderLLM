@@ -1,55 +1,55 @@
-# 用 Cloudflare Tunnel 取代 ngrok
+# Replacing ngrok with Cloudflare Tunnel
 
-ngrok 免費版每次重啟就換網址，得回 LINE 後台重設 webhook URL。Cloudflare Tunnel
-給你固定網址、自動 HTTPS、不用開防火牆連接埠，而且免費。
+The free ngrok plan changes its URL on every restart, so you have to go back to the LINE console and reset the webhook URL. Cloudflare Tunnel
+gives you a fixed URL and automatic HTTPS, needs no open firewall ports, and is free.
 
-## 前置條件
+## Prerequisites
 
-- **一個掛在 Cloudflare 的域名**（免費方案即可）。沒有域名就只能拿到隨機的
-  `*.trycloudflare.com`，等於沒解決問題。域名在哪裡註冊都可以，只要 DNS 交給
-  Cloudflare 管——見下面的「步驟零」。
-- 應用程式跑在本機的 5001 埠（`app_with_liff.py`）。若改跑 `main.py` 則是 5000，
-  下面所有 5001 都要跟著改。
+- **A domain on Cloudflare** (the free plan is fine). Without a domain you only get a random
+  `*.trycloudflare.com`, which doesn't solve the problem. The domain can be registered anywhere, as long as its DNS is managed by
+  Cloudflare — see "Step zero" below.
+- The app runs locally on port 5001 (`app_with_liff.py`). If you run `main.py` instead, it's 5000,
+  and every 5001 below must change accordingly.
 
-## 步驟零：把 Gandi 的網域接到 Cloudflare
+## Step zero: connect the Gandi domain to Cloudflare
 
-只是把 DNS 代管換成 Cloudflare，網域註冊仍留在 Gandi，不會產生費用。
+This only moves DNS hosting to Cloudflare; the domain registration stays at Gandi, and there's no cost.
 
-**1. 在 Cloudflare 加入網站**
+**1. Add the site in Cloudflare**
 
-Cloudflare 儀表板 → **Add a domain** → **Connect a domain** → 輸入你的網域 →
-方案選 **Free**。Cloudflare 會掃描現有的 DNS 記錄，接著給你**兩組名稱伺服器**，
-長得像：
+Cloudflare dashboard → **Add a domain** → **Connect a domain** → enter your domain →
+choose the **Free** plan. Cloudflare scans the existing DNS records, then gives you **two name servers**,
+which look like:
 
 ```
 xxxx.ns.cloudflare.com
 yyyy.ns.cloudflare.com
 ```
 
-把這兩組抄下來。
+Write these two down.
 
-**2. 在 Gandi 改名稱伺服器**
+**2. Change the name servers at Gandi**
 
-Gandi 管理後台 → 選擇網域 → 左側 **Nameservers**（名稱伺服器）→ 點 **Change**。
+Gandi admin panel → select the domain → **Nameservers** on the left → click **Change**.
 
-Gandi 預設用的是自家的 **Gandi LiveDNS**，要改成 **External**（外部），
-然後把 Cloudflare 給的兩組填進去，儲存。
+Gandi uses its own **Gandi LiveDNS** by default; change it to **External**,
+then enter the two name servers from Cloudflare and save.
 
-**3. 等待生效**
+**3. Wait for it to take effect**
 
-通常幾分鐘到幾小時，最長 24 小時。生效後 Cloudflare 會寄信通知，
-儀表板上該網域的狀態會從 *Pending Nameserver Update* 變成 **Active**。
+Usually a few minutes to a few hours, at most 24 hours. Once it takes effect Cloudflare sends an email,
+and the domain's status on the dashboard changes from *Pending Nameserver Update* to **Active**.
 
-**必須等到 Active 才能往下做**——狀態還是 Pending 時，
-下面的 `cloudflared tunnel login` 不會列出這個網域。
+**You must wait until it's Active before continuing** — while the status is still Pending,
+`cloudflared tunnel login` below won't list this domain.
 
-查詢目前生效的 NS：
+Check the currently effective NS:
 
 ```powershell
-nslookup -type=NS 你的網域.com
+nslookup -type=NS your-domain.com
 ```
 
-## 一、安裝 cloudflared
+## 1. Install cloudflared
 
 **Windows**
 
@@ -64,97 +64,97 @@ curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloud
 sudo dpkg -i cloudflared.deb
 ```
 
-裝完確認：
+Verify the install:
 
 ```powershell
 cloudflared --version
 ```
 
-## 二、登入並建立通道
+## 2. Log in and create the tunnel
 
-登入會開瀏覽器要你選網域，**必須自己執行**（需要互動）：
+Login opens a browser asking you to pick a domain, so **you must run it yourself** (it's interactive):
 
 ```powershell
 cloudflared tunnel login
 ```
 
-成功後會在 `%USERPROFILE%\.cloudflared\` 產生 `cert.pem`。接著建立通道：
+On success it creates `cert.pem` in `%USERPROFILE%\.cloudflared\`. Then create the tunnel:
 
 ```powershell
 cloudflared tunnel create lineorder
 ```
 
-輸出會包含一組 **Tunnel ID**（UUID），以及憑證檔路徑
-`%USERPROFILE%\.cloudflared\<TUNNEL_ID>.json`。兩者等一下都要填進設定檔。
+The output includes a **Tunnel ID** (UUID) and the credentials file path
+`%USERPROFILE%\.cloudflared\<TUNNEL_ID>.json`. Both go into the config file shortly.
 
-## 三、設定 DNS
+## 3. Configure DNS
 
-把子網域指向這個通道。`line` 可以換成你想要的名字：
+Point a subdomain at the tunnel. `line` can be any name you like:
 
 ```powershell
-cloudflared tunnel route dns lineorder line.你的網域.com
+cloudflared tunnel route dns lineorder line.your-domain.com
 ```
 
-這會自動在 Cloudflare 建一筆 CNAME，不需要手動去後台加。
+This automatically creates a CNAME record in Cloudflare; no need to add it manually in the dashboard.
 
-## 四、寫設定檔
+## 4. Write the config file
 
-把 `cloudflared/config.example.yml` 複製到 `%USERPROFILE%\.cloudflared\config.yml`，
-換掉 `<TUNNEL_ID>`、`<憑證檔路徑>`、`<你的網域>` 三處。
+Copy `cloudflared/config.example.yml` to `%USERPROFILE%\.cloudflared\config.yml`,
+and replace the three placeholders `<TUNNEL_ID>`, `<CREDENTIALS_DIR>`, and `<YOUR_DOMAIN>`.
 
-## 五、測試
+## 5. Test
 
-先啟動應用：
+Start the app first:
 
 ```powershell
 python app_with_liff.py
 ```
 
-另開一個視窗跑通道：
+Run the tunnel in another window:
 
 ```powershell
 cloudflared tunnel run lineorder
 ```
 
-確認健康檢查通得過（`app_with_liff.py:134` 的 `/health`）：
+Confirm the health check passes (`/health` at `app_with_liff.py:134`):
 
 ```powershell
-curl https://line.你的網域.com/health
+curl https://line.your-domain.com/health
 ```
 
-## 六、設定 LINE webhook
+## 6. Configure the LINE webhook
 
-到 [LINE Developers Console](https://developers.line.biz/console/) → 你的 Channel →
-Messaging API → Webhook URL 填：
+Go to the [LINE Developers Console](https://developers.line.biz/console/) → your Channel →
+Messaging API → set the Webhook URL to:
 
 ```
-https://line.你的網域.com/callback
+https://line.your-domain.com/callback
 ```
 
-按 **Verify** 確認回 200，並把 **Use webhook** 打開。
+Click **Verify** to confirm it returns 200, and turn on **Use webhook**.
 
-接著到 [LINE Official Account Manager](https://manager.line.biz/) →
-設定 → 回應設定，確認 **Webhook 是啟用的**。這一步很常被漏掉——
-切到聊天模式時若沒開 webhook，事件不會送出來。
+Then go to [LINE Official Account Manager](https://manager.line.biz/) →
+Settings → Response settings, and confirm **Webhook is enabled**. This step is often missed —
+if the webhook isn't on when you switch to chat mode, events won't be sent.
 
-## 七、設成常駐服務
+## 7. Run as a persistent service
 
-上面是前景執行，關掉視窗就斷。要 24/7 常駐：
+The above runs in the foreground; closing the window drops it. To run 24/7:
 
-**Windows（跑在自己的電腦上）**
+**Windows (running on your own computer)**
 
-這是本專案目前採用的方式。有三件事都要做，少一件就會漏單。
+This is the approach this project currently uses. All three steps are required; skip one and you'll miss orders.
 
-**1. 把通道註冊成服務**（以系統管理員身分執行 PowerShell）
+**1. Register the tunnel as a service** (run PowerShell as Administrator)
 
 ```powershell
 cloudflared service install
 ```
 
-**2. 讓 Flask 也開機自動啟動**
+**2. Make Flask start at boot too**
 
-上一步只讓「通道」常駐，**Flask 應用本身還是會在關機後消失**。
-用 NSSM 把它包成 Windows 服務：
+The previous step only keeps the *tunnel* running; **the Flask app itself still disappears after a shutdown**.
+Wrap it as a Windows service with NSSM:
 
 ```powershell
 winget install NSSM.NSSM
@@ -164,39 +164,39 @@ nssm set LineOrderBot Start SERVICE_AUTO_START
 nssm start LineOrderBot
 ```
 
-**3. 關掉睡眠**
+**3. Disable sleep**
 
-電腦睡眠時網路卡會斷電，通道跟著斷。訂單進來時沒人接，客人不會收到任何回應，
-你也不會知道少了一筆。
+When the computer sleeps, the network adapter loses power and the tunnel drops. If an order comes in with nobody listening, the customer gets no response,
+and you won't know an order was missed.
 
 ```powershell
 powercfg /change standby-timeout-ac 0
 powercfg /change hibernate-timeout-ac 0
 ```
 
-螢幕可以照常關（`monitor-timeout-ac` 不用動），只要主機不進睡眠就行。
+The screen can still turn off as usual (leave `monitor-timeout-ac` alone); the machine just must not go to sleep.
 
-## 漏單風險與緩解
+## Missed-order risk and mitigation
 
-跑在自己的電腦上，停電、當機、Windows 自動更新重開機都會造成訂單漏收，
-而且 **LINE 預設不會重送，你也不會收到任何通知**。至少做這兩件事：
+Running on your own computer, power outages, crashes, and Windows Update reboots will all cause missed orders,
+and **LINE does not redeliver by default, nor will you get any notification**. At minimum, do these two things:
 
-**開啟 LINE 的 webhook 重送**
+**Enable LINE webhook redelivery**
 
-LINE Developers Console → 你的 Channel → Messaging API →
-把 **Webhook redelivery** 開起來。這樣 LINE 在送不到時會重試，
-短暫離線（重開機、網路閃斷）就不會直接掉單。
+LINE Developers Console → your Channel → Messaging API →
+turn on **Webhook redelivery**. LINE then retries when delivery fails,
+so brief outages (reboots, network blips) won't drop orders outright.
 
-注意重送會造成**同一則訊息收到兩次**，所以 webhook 端必須能去重
-（用 event 的 `webhookEventId` 判斷）。
+Note that redelivery means **the same message can arrive twice**, so the webhook side must deduplicate
+(using the event's `webhookEventId`).
 
-**定期核對**
+**Reconcile regularly**
 
-LINE Official Account Manager 的聊天視窗是完整的，
-可以定期用它跟資料庫比對，確認沒有訊息漏接。
+The chat window in LINE Official Account Manager is complete,
+so compare it against the database regularly to confirm no messages were missed.
 
-長期而言，若訂單量變大到漏一筆就有實際損失，還是應該搬到 EC2 那類
-24 小時開機的機器上。屆時 Cloudflare Tunnel 可以直接沿用，不用重做。
+Long term, if order volume grows to the point where one missed order means real loss, you should move to a machine
+that's on 24 hours a day, like EC2. Cloudflare Tunnel can be reused as-is then, with no rework.
 
 **Ubuntu / EC2**
 
@@ -205,17 +205,17 @@ sudo cloudflared service install
 sudo systemctl enable --now cloudflared
 ```
 
-Flask 端建議另外寫一個 systemd unit，並改用 gunicorn 而非 Flask 開發伺服器。
+For the Flask side, write a separate systemd unit and use gunicorn instead of the Flask dev server.
 
-## 常見問題
+## FAQ
 
-**`ERR_NGROK`-style 的 502 / 1033 錯誤**
-通道通了但後端沒起來。先確認 `curl http://localhost:5001/health` 在本機通得過。
+**`ERR_NGROK`-style 502 / 1033 errors**
+The tunnel is up but the backend isn't running. First confirm `curl http://localhost:5001/health` works locally.
 
-**LINE Verify 逾時**
-LINE 對 webhook 的回應時間要求很嚴，逾時會重送導致重複訊息。webhook 應該
-「收下、存檔、立刻回 200」，把 OpenAI 解析和 Google Sheets 寫入丟到背景做。
-目前 `app_with_liff.py:118` 的 `handle_message` 是同步處理的，這部分需要改。
+**LINE Verify times out**
+LINE is strict about webhook response time; timeouts trigger redelivery and duplicate messages. The webhook should
+"accept, store, return 200 immediately" and push OpenAI parsing and Google Sheets writes to the background.
+Currently `handle_message` at `app_with_liff.py:118` is synchronous, and this needs to change.
 
-**通道會自己斷線**
-設定檔裡的 `protocol: quic` 在某些網路環境會被擋，改成 `protocol: http2` 試試。
+**The tunnel disconnects on its own**
+`protocol: quic` in the config file is blocked in some network environments; try `protocol: http2` instead.

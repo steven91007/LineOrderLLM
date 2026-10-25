@@ -216,7 +216,7 @@ async function writeSelected() {
     render('<div class="msg err">寫入失敗：' + esc(data.error) + '</div>');
     return;
   }
-  // 寫入成功的訂單改標為已存在，避免不小心重複送出
+  // Mark successfully written orders as "already exists" so they are not accidentally submitted twice
   picked.forEach(i => { parsed[i].status = 'duplicate'; });
   render('<div class="msg ok">已寫入 ' + data.appended_rows + ' 筆訂單到試算表。</div>');
 }

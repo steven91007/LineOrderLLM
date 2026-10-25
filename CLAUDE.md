@@ -1,64 +1,70 @@
-# Claude 開發記錄
+# Claude Development Notes
 
-## 專案決策與技術方針
+## Project Decisions and Technical Direction
 
-### AI/LLM 實作統一規範
-- **統一使用 DSPy 框架**：所有 AI/LLM 相關功能都使用 DSPy 實作
-- **Langfuse 追蹤**：LLM 呼叫的追蹤統一走 `src/utils/langfuse_tracing.py`（OpenInference 的 DSPy instrumentor 自動捕捉），DSPy 模組本身不要再各自加追蹤程式碼
-- **不要再引入 MLflow**：已於 2026-08-14 全面移除，改用 Langfuse
-- **模組化設計**：每個 AI 功能都建立獨立的 DSPy 模組
+### Language
+- **English only** for commit messages, docs, code comments, docstrings, log messages and LLM prompt instructions.
+- Keep Chinese only where it is functional: customer/staff-facing text (LINE replies, Discord messages, LIFF UI),
+  Google Form/Sheet option strings and headers, item names, address data, matching keywords/regexes,
+  test fixtures, and the Chinese data inside few-shot examples.
 
-### 台灣地址標準化系統設計
+### AI/LLM Implementation Standards
+- **Use the DSPy framework for everything**: all AI/LLM features are implemented with DSPy
+- **Langfuse tracing**: LLM call tracing goes through `src/utils/langfuse_tracing.py` (captured automatically by the OpenInference DSPy instrumentor); DSPy modules must not add their own tracing code
+- **Do not reintroduce MLflow**: fully removed on 2026-08-14 and replaced by Langfuse
+- **Modular design**: every AI feature gets its own DSPy module
 
-#### 問題分析
-- 地址格式五花八門，單純規則匹配有限制
-- 需要 LLM 協助理解複雜的地址描述
-- 結合規則庫與 AI 判斷提高準確性
+### Taiwan Address Normalization Design
 
-#### 技術方案
-1. **DSPy 地址標準化模組**
-   - 建立 `AddressNormalizerSignature` 定義輸入輸出
-   - 建立 `AddressNormalizer` DSPy 模組
-   - 整合現有的地址規則庫作為 Few-shot examples
+#### Problem
+- Address formats vary wildly; pure rule matching has limits
+- An LLM is needed to understand complex address descriptions
+- Combine the rule base with AI judgment for better accuracy
 
-2. **混合式處理流程**
+#### Approach
+1. **DSPy address normalization module**
+   - `AddressNormalizerSignature` defines the inputs and outputs
+   - `AddressNormalizer` DSPy module
+   - Existing address rules are used as few-shot examples
+
+2. **Hybrid pipeline**
    ```
-   原始地址 → 規則預處理 → DSPy AI 標準化 → 規則後處理 → 標準化地址
+   Raw address → rule pre-processing → DSPy AI normalization → rule post-processing → normalized address
    ```
 
-3. **Langfuse 追蹤**
-   - 追蹤地址標準化成功率
-   - 記錄不同類型地址的處理效果
-   - 監控 AI 模組的準確性
+3. **Langfuse tracing**
+   - Track normalization success rate
+   - Record how well different address types are handled
+   - Monitor the accuracy of the AI module
 
-### 實作要點
-- DSPy 模組放在 `src/utils/dspy_modules/` 目錄
-- 每個模組都要有對應的 signature
-- 追蹤由 `langfuse_tracing.setup()` 在進入點統一啟用，模組內不重複設定
-- 提供 fallback 機制（AI 失敗時使用規則庫）
+### Implementation Notes
+- DSPy modules live in `src/utils/dspy_modules/`
+- Every module has a corresponding signature
+- Tracing is enabled once at the entry point via `langfuse_tracing.setup()`; modules do not set it up again
+- Provide a fallback (use the rule base when the AI fails)
 
-## 開發記錄
+## Development Log
 
-### 2025-08-01 地址標準化功能
-- ✅ 建立基礎規則庫（縣市升格、區域對照）
-- ✅ 實作地址補全功能
-- ✅ 加入 DSPy LLM 輔助處理複雜地址
-- ✅ 整合追蹤（原為 MLflow，2026-08-14 起改用 Langfuse）
-- ✅ 混合式處理流程（規則 + AI + 後處理）
+### 2025-08-01 Address normalization
+- ✅ Basic rule base (county/city upgrades, district mapping)
+- ✅ Address completion
+- ✅ DSPy LLM assistance for complex addresses
+- ✅ Tracing integration (originally MLflow; Langfuse since 2026-08-14)
+- ✅ Hybrid pipeline (rules + AI + post-processing)
 
-#### DSPy 地址標準化模組
-- `AddressNormalizerSignature`：定義地址標準化的輸入輸出格式
-- `AddressNormalizer`：DSPy 模組，包含 Few-shot 範例
-- 自動判斷複雜地址，選擇 AI 或規則處理
-- Fallback 機制確保穩定性
-- **保留地址備註**：如 `(XXX工地)`、`(XXX公司)` 等括號內容
+#### DSPy address normalization module
+- `AddressNormalizerSignature`: input/output format for address normalization
+- `AddressNormalizer`: DSPy module with few-shot examples
+- Automatically detects complex addresses and chooses AI or rule processing
+- Fallback keeps it stable
+- **Preserves address notes**: parenthesized content such as `(XXX工地)` (construction site) or `(XXX公司)` (company)
 
-#### DSPy 聊天紀錄解析模組
-- `ChatLogOrderSignature`：從 LINE 聊天紀錄抽出所有成立的訂單
-- `ChatLogParser`：DSPy 模組，兩段式解析（先抽取、再複查有無漏單）
-- 品項必須對到 `src/utils/form_options.py` 的表單下拉選項字串，不讓模型自由發揮
-- 早期的 `ItemParser` / `MultiParser` / `SingleParser` / `OrderClassifier` 已於
-  2026-08-21 移除，改由 `ChatLogParser` 統一處理
+#### DSPy chat log parsing module
+- `ChatLogOrderSignature`: extracts every confirmed order from a LINE chat log
+- `ChatLogParser`: DSPy module with two-pass parsing (extract first, then re-check for missed orders)
+- Items must match the form dropdown option strings in `src/utils/form_options.py`; the model may not invent its own
+- The earlier `ItemParser` / `MultiParser` / `SingleParser` / `OrderClassifier` were removed on
+  2026-08-21 and replaced by `ChatLogParser`
 
 ## Agent skills
 
