@@ -16,6 +16,16 @@ DSPY_API_KEY = os.getenv('DSPY_API_KEY', OPENAI_API_KEY)  # 預設使用 OpenAI 
 DSPY_MODEL = os.getenv('DSPY_MODEL', 'gpt-5.6-luna')
 DSPY_MAX_RETRIES = int(os.getenv('DSPY_MAX_RETRIES', 3))
 
+# TypeSafe Jev (decision model: choices, yes/no, scores; it does not generate text)
+TYPESAFE_API_KEY = os.getenv('TYPESAFE_API_KEY')
+TYPESAFE_MODEL = os.getenv('TYPESAFE_MODEL') or None  # None = use the API's default model
+
+# Item judgment backend: 'gpt' (current behavior), 'shadow' (use GPT, also record whether Jev agrees), 'jev'
+ITEM_JUDGE_BACKEND = os.getenv('ITEM_JUDGE_BACKEND', 'gpt')
+JEV_CONFIDENCE_FLOOR = float(os.getenv('JEV_CONFIDENCE_FLOOR', '0.5'))    # below this, Jev's answer is not used
+JEV_CONFIDENCE_REVIEW = float(os.getenv('JEV_CONFIDENCE_REVIEW', '0.8'))  # below this, used but flagged for manual review
+JEV_TIMEOUT_SECONDS = float(os.getenv('JEV_TIMEOUT_SECONDS', '10'))
+
 # 訂單客戶端類型選擇
 ORDER_CLIENT_TYPE = os.getenv('ORDER_CLIENT_TYPE', 'openai')  # 'openai' 或 'dspy'
 
