@@ -15,16 +15,9 @@ from typing import Any, Dict, List, Optional
 
 import dspy
 
+import config
+
 from ..utils.dspy_modules.chat_log_parser import ChatLogParser
-from ..utils.form_options import (
-    FAMILY_OPTIONS_CONFIRMED,
-    MAX_FAMILY_BOXES,
-    MAX_GIFTBOX_BOXES,
-    MAX_SHUANGSHUANG_SETS,
-    family_option,
-    giftbox_option,
-    shuangshuang_option,
-)
 from ..utils.form_sheet_client import (
     FormSheetClient,
     dedup_key,
@@ -32,12 +25,16 @@ from ..utils.form_sheet_client import (
     format_timestamp,
 )
 from ..utils import langfuse_tracing as tracing
+from ..utils.item_resolver import ItemFields, fields_from_raw, resolve_items
+from ..utils.jev_modules.item_judge import ItemJudgeError, JevItemJudge
 from ..utils.shipping_days import is_shipping_day, shipping_days_text, weekday_name
 from ..utils.taiwan_address import TaiwanAddressNormalizer
 from ..utils.text_sanitizer import clean_field, strip_emoji
 from ..utils.time_utils import time_utils
 
 logger = logging.getLogger(__name__)
+
+ITEM_JUDGE_BACKENDS = ('gpt', 'shadow', 'jev')
 
 # 推理型模型（o1/o3/o4、gpt-5.x）的 API 參數要求和一般模型不同：
 # 不接受 max_tokens（要用 max_completion_tokens），且 temperature 必須是 1.0。
@@ -50,6 +47,21 @@ def is_reasoning_model(model: str) -> bool:
     """判斷是否為推理型模型（含供應商前綴時取最後一段）"""
     name = (model or '').split('/')[-1]
     return bool(REASONING_MODEL_PATTERN.match(name))
+
+
+def build_lm(api_key: str, model: str) -> dspy.LM:
+    """Build the DSPy LM, handling the parameter differences of reasoning models"""
+    if is_reasoning_model(model):
+        # Reasoning models reject max_tokens and require temperature 1.0
+        lm = dspy.LM(model=model, api_key=api_key,
+                     max_tokens=REASONING_MAX_TOKENS, temperature=1.0)
+        # DSPy 2.6 only detects reasoning models by the o1/o3/o4 prefix, not gpt-5.x,
+        # so it still puts max_tokens into kwargs; swap in the correct parameter name here.
+        lm.kwargs.pop('max_tokens', None)
+        lm.kwargs['max_completion_tokens'] = REASONING_MAX_TOKENS
+        lm.kwargs['temperature'] = 1.0
+        return lm
+    return dspy.LM(model=model, api_key=api_key, max_tokens=4000, temperature=0.1)
 
 
 # 出貨日的定義集中在 shipping_days.py，稽核工具（/offday）共用同一份
@@ -74,9 +86,11 @@ class ChatLogImporter:
     """把聊天紀錄轉成表單回覆試算表的資料列"""
 
     def __init__(self, api_key: str, sheet_id: str, credentials_path: str,
-                 model: str = 'gpt-5.6-luna', normalize_addresses: bool = True):
+                 model: str = 'gpt-5.6-luna', normalize_addresses: bool = True,
+                 item_judge_backend: Optional[str] = None):
         self.model = model
         self.normalize_addresses = normalize_addresses
+        self.item_judge_backend, self.item_judge = self._build_item_judge(item_judge_backend)
         # 必須在建立 DSPy 模組之前 instrument，否則抓不到 LM 呼叫
         tracing.setup()
         self._configure_dspy(api_key, model)
@@ -91,18 +105,7 @@ class ChatLogImporter:
         在 Flask 這種每個請求跑在工作執行緒的情境下會直接拋錯。
         實際呼叫時一律用 dspy.context 套用（見 parse()），兩種情境都成立。
         """
-        if is_reasoning_model(model):
-            # 推理型模型不吃 max_tokens，且 temperature 必須是 1.0
-            self.lm = dspy.LM(model=model, api_key=api_key,
-                              max_tokens=REASONING_MAX_TOKENS, temperature=1.0)
-            # DSPy 2.6 的推理模型偵測只認 o1/o3/o4 開頭，不認得 gpt-5.x，
-            # 所以它仍然把 max_tokens 塞進 kwargs，這裡手動換成正確的參數名。
-            self.lm.kwargs.pop('max_tokens', None)
-            self.lm.kwargs['max_completion_tokens'] = REASONING_MAX_TOKENS
-            self.lm.kwargs['temperature'] = 1.0
-        else:
-            self.lm = dspy.LM(model=model, api_key=api_key,
-                              max_tokens=4000, temperature=0.1)
+        self.lm = build_lm(api_key, model)
 
         try:
             dspy.settings.configure(lm=self.lm)
@@ -154,7 +157,7 @@ class ChatLogImporter:
                 input_data=raw,
                 metadata={'source': 'chat_log', 'model': self.model},
             ) as span:
-                parsed = self._build_order(raw, moment)
+                parsed = self._build_order(raw, moment, chat_log, current_date)
                 parsed.session_id = key
 
                 if key in existing:
@@ -187,7 +190,8 @@ class ChatLogImporter:
         tracing.flush()
         return results
 
-    def _build_order(self, raw: Dict[str, Any], moment: datetime) -> ParsedOrder:
+    def _build_order(self, raw: Dict[str, Any], moment: datetime,
+                     chat_log: str = '', current_date: str = '') -> ParsedOrder:
         """把 LLM 輸出轉成資料列，同時累積需人工確認的原因"""
         problems = list(raw.get('issues') or [])
 
@@ -208,24 +212,10 @@ class ChatLogImporter:
         if sender_address:
             sender_address = self._normalize_address(sender_address, problems)
 
-        giftbox = self._resolve_item(
-            raw.get('giftbox_spec'), raw.get('giftbox_boxes'),
-            giftbox_option, MAX_GIFTBOX_BOXES, '禮盒', '盒', problems,
-        )
-        family = self._resolve_item(
-            raw.get('family_spec'), raw.get('family_boxes'),
-            family_option, MAX_FAMILY_BOXES, '家庭號', '箱', problems,
-        )
-        shuangshuang = self._resolve_shuangshuang(raw.get('shuangshuang_sets'), problems)
-
-        if family and shuangshuang:
-            problems.append('家庭號與雙雙對對同時出現，J 欄只能擇一寫入，請人工確認')
-        family = family or shuangshuang
-
-        if family and not FAMILY_OPTIONS_CONFIRMED:
-            problems.append('家庭號選項字串尚未和 Google 表單核對過，請確認後再寫入')
-        if shuangshuang:
-            problems.append('雙雙對對選項字串尚未和 Google 表單核對過，請確認表單已加上此選項後再寫入')
+        fields = self._judge_items(raw, receiver_name, problems, chat_log, current_date)
+        resolved = resolve_items(fields)
+        problems.extend(resolved.problems)
+        giftbox, family = resolved.giftbox, resolved.family
 
         shipping_date = self._resolve_shipping_date(raw.get('shipping_date'), problems, moment)
 
@@ -271,6 +261,63 @@ class ChatLogImporter:
 
         return ParsedOrder(order=order, row=row, problems=problems)
 
+    @staticmethod
+    def _build_item_judge(backend: Optional[str]):
+        """Pick the item judgment source from ITEM_JUDGE_BACKEND
+
+        gpt: use only the five fields from ChatLogParser (current behavior)
+        shadow: still use GPT, but also ask Jev and only record whether they agree
+        jev: use Jev when it is confident enough, otherwise fall back to GPT
+        """
+        backend = (backend or config.ITEM_JUDGE_BACKEND or 'gpt').lower()
+        if backend not in ITEM_JUDGE_BACKENDS:
+            logger.warning(f'Unknown ITEM_JUDGE_BACKEND "{backend}", falling back to gpt')
+            return 'gpt', None
+        if backend == 'gpt':
+            return backend, None
+        if not config.TYPESAFE_API_KEY:
+            logger.warning(f'ITEM_JUDGE_BACKEND={backend} but TYPESAFE_API_KEY is not set, falling back to gpt')
+            return 'gpt', None
+        judge = JevItemJudge(
+            api_key=config.TYPESAFE_API_KEY,
+            model=config.TYPESAFE_MODEL,
+            timeout_seconds=config.JEV_TIMEOUT_SECONDS,
+            confidence_floor=config.JEV_CONFIDENCE_FLOOR,
+        )
+        return backend, judge
+
+    def _judge_items(self, raw: Dict[str, Any], receiver_name: str, problems: List[str],
+                     chat_log: str, current_date: str) -> ItemFields:
+        """Decide this order's five item fields: GPT's answer or Jev's, depending on the backend"""
+        gpt_fields = fields_from_raw(raw)
+        if self.item_judge is None or not chat_log:
+            return gpt_fields
+
+        try:
+            judgment = self.item_judge.judge(chat_log, receiver_name or None, current_date)
+        except ItemJudgeError as error:
+            problems.append(f'Jev 品項判斷失敗，採用 GPT 判斷（{error}）')
+            return gpt_fields
+
+        agree = judgment.fields.normalized() == gpt_fields.normalized()
+        tracing.score('item_judge_agreement', 1.0 if agree else 0.0,
+                      comment=None if agree else
+                      f'GPT={gpt_fields.to_dict()} Jev={judgment.fields.to_dict()}')
+        if not agree:
+            problems.append(
+                f'品項判斷兩模型不一致：GPT={_describe_fields(gpt_fields)}，'
+                f'Jev={_describe_fields(judgment.fields)}'
+            )
+
+        if self.item_judge_backend != 'jev':
+            return gpt_fields
+        if not judgment.usable:
+            problems.append(f'Jev 信心不足（{judgment.confidence:.2f}），採用 GPT 判斷')
+            return gpt_fields
+        if judgment.confidence < config.JEV_CONFIDENCE_REVIEW:
+            problems.append(f'Jev 品項判斷信心 {judgment.confidence:.2f}，請人工確認')
+        return judgment.fields
+
     def _normalize_address(self, address: str, problems: List[str]) -> str:
         if not self.normalize_addresses:
             return address
@@ -284,73 +331,6 @@ class ChatLogImporter:
                 return address
             span.update(output=result, metadata={'changed': result != address})
             return result
-
-    def _resolve_item(self, spec: Any, boxes: Any, lookup, max_boxes: int,
-                      label: str, unit: str, problems: List[str]) -> Optional[str]:
-        """把規格與數量對照成表單的下拉選項字串"""
-        if not spec and not boxes:
-            return None
-
-        with tracing.trace(f'resolve-item-{label}',
-                           input_data={'spec': spec, 'quantity': boxes}) as span:
-            option = self._resolve_item_inner(
-                spec, boxes, lookup, max_boxes, label, unit, problems)
-            span.update(output=option, metadata={'matched': option is not None})
-            return option
-
-    def _resolve_item_inner(self, spec: Any, boxes: Any, lookup, max_boxes: int,
-                            label: str, unit: str, problems: List[str]) -> Optional[str]:
-        if not spec:
-            problems.append(f'{label}有數量但沒有規格')
-            return None
-        if not boxes:
-            problems.append(f'{label}有規格但沒有數量')
-            return None
-
-        try:
-            count = int(boxes)
-        except (TypeError, ValueError):
-            problems.append(f'{label}數量無法辨識（{boxes}）')
-            return None
-
-        if count > max_boxes:
-            problems.append(
-                f'{label} {count}{unit}超過表單選項上限（最多 {max_boxes}{unit}），需拆單或人工處理'
-            )
-            return None
-
-        option = lookup(str(spec), count)
-        if not option:
-            problems.append(f'{label}找不到對應選項：{spec} {count}{unit}')
-        return option
-
-    def _resolve_shuangshuang(self, sets: Any, problems: List[str]) -> Optional[str]:
-        """把「組數」對照成雙雙對對的選項字串（不分規格）"""
-        if not sets:
-            return None
-
-        with tracing.trace('resolve-item-雙雙對對', input_data={'quantity': sets}) as span:
-            option = self._resolve_shuangshuang_inner(sets, problems)
-            span.update(output=option, metadata={'matched': option is not None})
-            return option
-
-    def _resolve_shuangshuang_inner(self, sets: Any, problems: List[str]) -> Optional[str]:
-        try:
-            count = int(sets)
-        except (TypeError, ValueError):
-            problems.append(f'雙雙對對數量無法辨識（{sets}）')
-            return None
-
-        if count > MAX_SHUANGSHUANG_SETS:
-            problems.append(
-                f'雙雙對對 {count}組超過表單選項上限（最多 {MAX_SHUANGSHUANG_SETS}組），需拆單或人工處理'
-            )
-            return None
-
-        option = shuangshuang_option(count)
-        if not option:
-            problems.append(f'雙雙對對找不到對應選項：{count}組')
-        return option
 
     def _resolve_shipping_date(self, value: Any, problems: List[str],
                                moment: datetime) -> str:
@@ -427,6 +407,18 @@ class ChatLogImporter:
 
         tracing.flush()
         return result
+
+
+def _describe_fields(fields: ItemFields) -> str:
+    """Short Chinese summary of the item fields, used in problem messages shown to the shop owner"""
+    parts = []
+    if fields.giftbox_spec or fields.giftbox_boxes:
+        parts.append(f'禮盒{fields.giftbox_spec or "?"}×{fields.giftbox_boxes or "?"}')
+    if fields.family_spec or fields.family_boxes:
+        parts.append(f'家庭號{fields.family_spec or "?"}×{fields.family_boxes or "?"}')
+    if fields.shuangshuang_sets:
+        parts.append(f'雙雙對對×{fields.shuangshuang_sets}')
+    return '、'.join(parts) or '無'
 
 
 def _text(value: Any) -> str:

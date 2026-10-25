@@ -111,6 +111,43 @@ def trace(name: str, session_id: Optional[str] = None,
         yield span
 
 
+@contextmanager
+def generation(name: str, *, model: Optional[str] = None, input_data: Any = None,
+               metadata: Optional[Dict[str, Any]] = None,
+               model_parameters: Optional[Dict[str, Any]] = None):
+    """Create a generation observation for model calls the DSPy instrumentor can't see (e.g. Jev)
+
+    Same contract as trace(): yields _NullSpan when disabled; only a failure to create the
+    observation is swallowed, exceptions from the body propagate unchanged.
+    Callers fill in the rest before exiting with
+    span.update(output=..., model=..., usage_details=..., cost_details=...).
+    """
+    if not _enabled:
+        yield _NullSpan()
+        return
+
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    try:
+        from langfuse import get_client
+
+        span = stack.enter_context(
+            get_client().start_as_current_observation(
+                as_type='generation', name=name, model=model, input=input_data,
+                metadata=metadata, model_parameters=model_parameters,
+            )
+        )
+    except Exception as error:
+        logger.warning(f'Failed to create Langfuse generation "{name}", skipping tracing: {error}')
+        stack.close()
+        yield _NullSpan()
+        return
+
+    with stack:
+        yield span
+
+
 def score(name: str, value: float, comment: Optional[str] = None):
     """對目前的 trace 打分數，用來累積解析品質的長期統計"""
     if not _enabled:
