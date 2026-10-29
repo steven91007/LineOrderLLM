@@ -1,0 +1,29 @@
+---
+kind: "change"
+sha256: "5dbefc765f549aac2ddbc1687815526dcba5ea4daa2db1db4aeddf2530bc1976"
+git_sha: "f931b55f9cd11f08578e4119e530ee17ea5bef78"
+commit_note_sha256: "ad383fe446325d40c2f6b160ff07303879f2c830065d5914abaf9c04018e48cc"
+path: "knowledge/changes/41be6ee7dc1a7b1770da2f63bd91b6a64703c1a0b47a83f5d694e532b79a1932.md"
+old_path: null
+status: "A"
+insertions: 30
+deletions: 0
+binary: false
+truncated: true
+truncation_reason: "excluded"
+change_kind: "docs"
+notable_symbols: []
+model: "claude-code/claude-opus-5-5"
+hash_recipe: "gitkb-canonical-v1;diff=-c core.quotePath=false -c diff.renames=true diff-tree -r --no-commit-id --no-color --no-ext-diff --no-textconv --full-index --find-renames=50% -U3 --src-prefix=a/ --dst-prefix=b/;per_file_cap=65536;total_cap=400000;exclude=knowledge/**"
+created_at: "2026-10-29T13:37:20+00:00"
+---
+
+# knowledge/changes/41be6ee7dc1a7b1770da2f63bd91b6a64703c1a0b47a83f5d694e532b79a1932.md @ f931b55
+
+Part of commit [f931b55 Build gitkb knowledge notes covering all 53 commits after the history rewrite](../commits/ad383fe446325d40c2f6b160ff07303879f2c830065d5914abaf9c04018e48cc.md) (A, +30/-0, kind: docs)
+
+## Summary
+Generated gitkb change note for one file in one commit (front matter with path, status, line counts and change kind, then Summary and Notable symbols). Content omitted from the diff by the knowledge/** exclude glob.
+
+## Notable symbols
+- (none)
